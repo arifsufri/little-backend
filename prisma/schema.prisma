@@ -37,6 +37,7 @@ model Package {
   duration     Int           @default(30)
   discountCode String?
   imageUrl     String?
+  isActive     Boolean       @default(true)
   createdBy    Int
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt

@@ -87,6 +87,19 @@ export const createPackage = async (req: AuthRequest, res: Response) => {
   try {
     const { name, description, price, barber, duration, discountCode } = req.body;
     
+    // Check if user is Boss
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.userId }
+    });
+
+    if (!user || user.role !== 'Boss') {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Only Boss role can create packages'
+      });
+    }
+    
     if (!name || !description || !price) {
       return res.status(400).json({
         success: false,
@@ -151,7 +164,20 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (!name && !description && !price && !barber && !duration && !discountCode) {
+    // Check if user is Boss
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.userId }
+    });
+
+    if (!user || user.role !== 'Boss') {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Only Boss role can update packages'
+      });
+    }
+
+    if (!name && !description && !price && !barber && !duration && !discountCode && !req.file) {
       return res.status(400).json({
         success: false,
         error: 'No update data provided',
@@ -171,13 +197,9 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    // Check if user owns the package or is admin
-    if (existingPackage.createdBy !== req.user!.userId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Unauthorized',
-        message: 'You can only update packages you created'
-      });
+    let imageUrl = existingPackage.imageUrl;
+    if (req.file) {
+      imageUrl = `/uploads/${req.file.filename}`;
     }
 
     const updatedPackage = await prisma.package.update({
@@ -188,7 +210,8 @@ export const updatePackage = async (req: AuthRequest, res: Response) => {
         ...(price && { price: parseFloat(price) }),
         ...(barber !== undefined && { barber }),
         ...(duration && { duration: parseInt(duration) }),
-        ...(discountCode !== undefined && { discountCode })
+        ...(discountCode !== undefined && { discountCode }),
+        ...(req.file && { imageUrl })
       },
       include: {
         creator: {
@@ -229,6 +252,19 @@ export const deletePackage = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Check if user is Boss
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.userId }
+    });
+
+    if (!user || user.role !== 'Boss') {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Only Boss role can delete packages'
+      });
+    }
+
     const existingPackage = await prisma.package.findUnique({
       where: { id: packageId }
     });
@@ -238,15 +274,6 @@ export const deletePackage = async (req: AuthRequest, res: Response) => {
         success: false,
         error: 'Package not found',
         message: 'No package found with the specified ID'
-      });
-    }
-
-    // Check if user owns the package or is admin
-    if (existingPackage.createdBy !== req.user!.userId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Unauthorized',
-        message: 'You can only delete packages you created'
       });
     }
 
@@ -263,6 +290,75 @@ export const deletePackage = async (req: AuthRequest, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete package',
+      message: 'Internal server error'
+    });
+  }
+};
+
+export const togglePackageStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const packageId = parseInt(id);
+
+    if (isNaN(packageId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid package ID',
+        message: 'Package ID must be a number'
+      });
+    }
+
+    // Check if user is Boss
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.userId }
+    });
+
+    if (!user || user.role !== 'Boss') {
+      return res.status(403).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Only Boss role can toggle package status'
+      });
+    }
+
+    const existingPackage = await prisma.package.findUnique({
+      where: { id: packageId }
+    });
+
+    if (!existingPackage) {
+      return res.status(404).json({
+        success: false,
+        error: 'Package not found',
+        message: 'No package found with the specified ID'
+      });
+    }
+
+    const updatedPackage = await prisma.package.update({
+      where: { id: packageId },
+      data: {
+        isActive: !existingPackage.isActive
+      },
+      include: {
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      data: updatedPackage,
+      message: `Package ${updatedPackage.isActive ? 'activated' : 'deactivated'} successfully`
+    });
+  } catch (error) {
+    console.error('Error toggling package status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to toggle package status',
       message: 'Internal server error'
     });
   }

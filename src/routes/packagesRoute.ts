@@ -8,7 +8,8 @@ import {
   getPackageById,
   createPackage,
   updatePackage,
-  deletePackage
+  deletePackage,
+  togglePackageStatus
 } from '../controllers/packageController';
 
 const router = express.Router();
@@ -51,6 +52,7 @@ router.get('/:id', getPackageById);
 // Protected routes (require authentication)
 router.post('/', authenticateToken, upload.single('image'), createPackage);
 router.put('/:id', authenticateToken, upload.single('image'), updatePackage);
+router.patch('/:id/toggle-status', authenticateToken, togglePackageStatus);
 router.delete('/:id', authenticateToken, deletePackage);
 
 export default router;
