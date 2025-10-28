@@ -15,13 +15,18 @@ RUN \
 
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+# Copy source files explicitly (excluding .env files)
+COPY src ./src
+COPY prisma ./prisma
+COPY package.json ./
+COPY tsconfig.json ./
+COPY start.sh ./
 RUN npm run build
 
 FROM base AS runner
 ENV NODE_ENV=production
-ENV PORT=4000
-EXPOSE 4000
+ENV PORT=10000
+EXPOSE 10000
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
