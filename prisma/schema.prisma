@@ -1,0 +1,79 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  Boss
+  Staff
+  Client
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String    @unique
+  password  String?
+  avatar    String?  
+  role      UserRole  @default(Client)
+  isActive  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  packages  Package[]
+  barberAppointments Appointment[] @relation("AppointmentBarber")
+}
+
+model Package {
+  id           Int           @id @default(autoincrement())
+  name         String
+  description  String
+  price        Float
+  barber       String?
+  duration     Int           @default(30)
+  discountCode String?
+  imageUrl     String?
+  createdBy    Int
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  // Relations
+  creator      User          @relation(fields: [createdBy], references: [id])
+  appointments Appointment[] // Relation to appointments that book this package
+}
+
+model Client {
+  id           Int           @id @default(autoincrement())
+  clientId     String        @unique // Auto-generated format: LITTLEC1, LITTLEC2, etc.
+  fullName     String
+  phoneNumber  String        @unique // Malaysian phone format validation
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  // Relations
+  appointments Appointment[] // Relation to appointments made by this client
+}
+
+model Appointment {
+  id              Int      @id @default(autoincrement())
+  clientId        Int
+  packageId       Int
+  barberId        Int?     // Selected barber (Staff user ID)
+  status          String   @default("pending") // pending, confirmed, completed, cancelled
+  appointmentDate DateTime?
+  notes           String?
+  additionalPackages Json?  // Array of additional package IDs
+  customPackages  Json?    // Array of custom packages with name and price
+  finalPrice      Float?   // Final price after adjustments
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  client          Client   @relation(fields: [clientId], references: [id])
+  package         Package  @relation(fields: [packageId], references: [id])
+  barber          User?    @relation("AppointmentBarber", fields: [barberId], references: [id])
+}
