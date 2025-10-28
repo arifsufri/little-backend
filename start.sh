@@ -1,4 +1,6 @@
 #!/bin/sh
 set -e
-npx prisma db push
+echo "Running database migrations..."
+npx prisma migrate deploy
+echo "Starting application..."
 node dist/index.js
