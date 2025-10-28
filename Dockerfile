@@ -5,16 +5,18 @@ RUN apk add --no-cache openssl libc6-compat
 
 FROM base AS deps
 COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* ./
+COPY prisma ./prisma
 RUN \
   if [ -f package-lock.json ]; then npm ci; \
   elif [ -f pnpm-lock.yaml ]; then npm i -g pnpm && pnpm i --frozen-lockfile; \
   elif [ -f yarn.lock ]; then yarn install --frozen-lockfile; \
-  else npm install; fi
+  else npm install; fi && \
+  npx prisma generate
 
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run prisma:generate && npm run build
+RUN npm run build
 
 FROM base AS runner
 ENV NODE_ENV=production
