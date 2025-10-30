@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// Utility function to generate client ID
+// Utility function to generate client ID.
 const generateClientId = async (): Promise<string> => {
   const lastClient = await prisma.client.findFirst({
     orderBy: { id: 'desc' }
