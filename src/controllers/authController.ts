@@ -116,10 +116,10 @@ export const login = async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      return res.status(401).json({
+      return res.status(404).json({
         success: false,
-        error: 'Invalid credentials',
-        message: 'Email or password is incorrect'
+        error: 'Email not registered',
+        message: 'This email is not registered. Please check your email or create an account.'
       });
     }
 
@@ -137,8 +137,8 @@ export const login = async (req: Request, res: Response) => {
     if (!validPassword) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid credentials',
-        message: 'Email or password is incorrect'
+        error: 'Wrong password',
+        message: 'The password you entered is incorrect. Please try again.'
       });
     }
 

@@ -22,10 +22,12 @@ model User {
   avatar    String?  
   role      UserRole  @default(Client)
   isActive  Boolean   @default(false)
+  commissionRate Float? @default(40.0) // Commission percentage for Staff (e.g., 40.0 = 40%)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   packages  Package[]
   barberAppointments Appointment[] @relation("AppointmentBarber")
+  expenses  Expense[] @relation("ExpenseCreator")
 }
 
 model Package {
@@ -77,4 +79,18 @@ model Appointment {
   client          Client   @relation(fields: [clientId], references: [id])
   package         Package  @relation(fields: [packageId], references: [id])
   barber          User?    @relation("AppointmentBarber", fields: [barberId], references: [id])
+}
+
+model Expense {
+  id          Int      @id @default(autoincrement())
+  category    String   // e.g., "Rent", "Utilities", "Supplies", "Marketing"
+  description String
+  amount      Float
+  date        DateTime @default(now())
+  createdBy   Int      // Boss user ID who recorded the expense
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  creator     User     @relation("ExpenseCreator", fields: [createdBy], references: [id])
 }

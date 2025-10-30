@@ -9,6 +9,8 @@ import userRoute from './routes/userRoute';
 import packagesRoute from './routes/packagesRoute';
 import clientRoute from './routes/clientRoute';
 import appointmentRoute from './routes/appointmentRoute';
+import staffRoute from './routes/staffRoute';
+import financialRoute from './routes/financialRoute';
 
 // Import middleware
 import { errorHandler, notFound } from './middleware/errorHandler';
@@ -44,6 +46,8 @@ app.use('/users', userRoute);
 app.use('/packages', packagesRoute);
 app.use('/clients', clientRoute);
 app.use('/appointments', appointmentRoute);
+app.use('/staff', staffRoute);
+app.use('/financial', financialRoute);
 
 // Basic route for testing
 app.get('/', (req, res) => {
@@ -55,7 +59,9 @@ app.get('/', (req, res) => {
       users: '/users',
       packages: '/packages',
       clients: '/clients',
-      appointments: '/appointments'
+      appointments: '/appointments',
+      staff: '/staff',
+      financial: '/financial'
     }
   });
 });

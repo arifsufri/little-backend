@@ -158,6 +158,14 @@ export const getAllAppointments = async (req: Request, res: Response) => {
             barber: true,
             imageUrl: true
           }
+        },
+        barber: {
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            commissionRate: true
+          }
         }
       }
     });
@@ -238,7 +246,7 @@ export const getAppointmentById = async (req: Request, res: Response) => {
 export const updateAppointmentStatus = async (req: Request, res: Response) => {
   try {
     const appointmentId = parseInt(req.params.id);
-    const { status, appointmentDate, notes, additionalPackages, customPackages, finalPrice } = req.body;
+    const { status, appointmentDate, notes, additionalPackages, customPackages, finalPrice, barberId } = req.body;
 
     if (isNaN(appointmentId)) {
       return res.status(400).json({
@@ -288,17 +296,82 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       }
     }
 
+    // If marking as completed, assign current user as barber (if not already assigned)
+    const updateData: any = {
+      ...(status && { status }),
+      ...(appointmentDate && { appointmentDate: new Date(appointmentDate) }),
+      ...(notes !== undefined && { notes }),
+      ...(additionalPackages !== undefined && { additionalPackages }),
+      ...(customPackages !== undefined && { customPackages }),
+      ...(finalPrice !== undefined && { finalPrice: parseFloat(finalPrice) })
+    };
+
+    // Handle barber assignment (Boss only, unless auto-assigning on completion)
+    if (barberId !== undefined) {
+      // Verify user has permission to change barber (Boss only)
+      if ((req as any).user) {
+        const currentUser = await prisma.user.findUnique({
+          where: { id: (req as any).user.userId },
+          select: { id: true, role: true }
+        });
+        
+        if (currentUser?.role === 'Boss' || currentUser?.role === 'Staff') {
+          if (barberId === null) {
+            updateData.barberId = null;
+          } else {
+            // Verify barber exists and is active
+            const barber = await prisma.user.findUnique({
+              where: { 
+                id: parseInt(barberId),
+                role: { in: ['Boss', 'Staff'] },
+                isActive: true
+              }
+            });
+            
+            if (!barber) {
+              return res.status(400).json({
+                success: false,
+                error: 'Invalid barber',
+                message: 'Selected barber does not exist or is not active'
+              });
+            }
+            
+            updateData.barberId = parseInt(barberId);
+          }
+        } else {
+          return res.status(403).json({
+            success: false,
+            error: 'Permission denied',
+            message: 'Only Boss and Staff can change barber assignments'
+          });
+        }
+      }
+    }
+
+    // Auto-assign barber when completing appointment
+    if (status === 'completed' && (req as any).user) {
+      const currentUser = await prisma.user.findUnique({
+        where: { id: (req as any).user.userId },
+        select: { id: true, role: true, email: true }
+      });
+
+      console.log(`Appointment Completion Debug:
+        - Current User: ${JSON.stringify(currentUser)}
+        - Existing Appointment barberId: ${existingAppointment.barberId}
+        - Will assign barber: ${currentUser && ['Boss', 'Staff'].includes(currentUser.role) && !existingAppointment.barberId}
+      `);
+
+      // Only assign if user is Boss or Staff and appointment doesn't already have a barber
+      if (currentUser && ['Boss', 'Staff'].includes(currentUser.role) && !existingAppointment.barberId) {
+        updateData.barberId = currentUser.id;
+        console.log(`Assigned barberId ${currentUser.id} to appointment ${appointmentId}`);
+      }
+    }
+
     // Update appointment
     const updatedAppointment = await prisma.appointment.update({
       where: { id: appointmentId },
-      data: {
-        ...(status && { status }),
-        ...(appointmentDate && { appointmentDate: new Date(appointmentDate) }),
-        ...(notes !== undefined && { notes }),
-        ...(additionalPackages !== undefined && { additionalPackages }),
-        ...(customPackages !== undefined && { customPackages }),
-        ...(finalPrice !== undefined && { finalPrice: parseFloat(finalPrice) })
-      },
+      data: updateData,
       include: {
         client: {
           select: {
@@ -314,6 +387,14 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
             price: true,
             duration: true,
             barber: true
+          }
+        },
+        barber: {
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            commissionRate: true
           }
         }
       }
