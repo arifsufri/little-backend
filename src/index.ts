@@ -11,6 +11,7 @@ import clientRoute from './routes/clientRoute';
 import appointmentRoute from './routes/appointmentRoute';
 import staffRoute from './routes/staffRoute';
 import financialRoute from './routes/financialRoute';
+import discountRoute from './routes/discountRoute';
 
 // Import middleware
 import { errorHandler, notFound } from './middleware/errorHandler';
@@ -48,6 +49,7 @@ app.use('/clients', clientRoute);
 app.use('/appointments', appointmentRoute);
 app.use('/staff', staffRoute);
 app.use('/financial', financialRoute);
+app.use('/discount-codes', discountRoute);
 
 // Basic route for testing
 app.get('/', (req, res) => {
@@ -61,7 +63,8 @@ app.get('/', (req, res) => {
       clients: '/clients',
       appointments: '/appointments',
       staff: '/staff',
-      financial: '/financial'
+      financial: '/financial',
+      discountCodes: '/discount-codes'
     }
   });
 });

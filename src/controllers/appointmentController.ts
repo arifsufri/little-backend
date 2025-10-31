@@ -246,7 +246,7 @@ export const getAppointmentById = async (req: Request, res: Response) => {
 export const updateAppointmentStatus = async (req: Request, res: Response) => {
   try {
     const appointmentId = parseInt(req.params.id);
-    const { status, appointmentDate, notes, additionalPackages, customPackages, finalPrice, barberId } = req.body;
+    const { status, appointmentDate, notes, additionalPackages, customPackages, finalPrice, barberId, discountCodeId, discountAmount } = req.body;
 
     if (isNaN(appointmentId)) {
       return res.status(400).json({
@@ -303,7 +303,9 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       ...(notes !== undefined && { notes }),
       ...(additionalPackages !== undefined && { additionalPackages }),
       ...(customPackages !== undefined && { customPackages }),
-      ...(finalPrice !== undefined && { finalPrice: parseFloat(finalPrice) })
+      ...(finalPrice !== undefined && { finalPrice: parseFloat(finalPrice) }),
+      ...(discountCodeId !== undefined && { discountCodeId: discountCodeId ? parseInt(discountCodeId) : null }),
+      ...(discountAmount !== undefined && { discountAmount: discountAmount ? parseFloat(discountAmount) : null })
     };
 
     // Handle barber assignment (Boss only, unless auto-assigning on completion)
@@ -368,36 +370,58 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // Update appointment
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: updateData,
-      include: {
-        client: {
-          select: {
-            clientId: true,
-            fullName: true,
-            phoneNumber: true
-          }
-        },
-        package: {
-          select: {
-            name: true,
-            description: true,
-            price: true,
-            duration: true,
-            barber: true
-          }
-        },
-        barber: {
-          select: {
-            id: true,
-            name: true,
-            role: true,
-            commissionRate: true
+    // Update appointment (with discount code usage tracking)
+    const updatedAppointment = await prisma.$transaction(async (tx) => {
+      // Update the appointment
+      const appointment = await tx.appointment.update({
+        where: { id: appointmentId },
+        data: updateData,
+        include: {
+          client: {
+            select: {
+              id: true,
+              clientId: true,
+              fullName: true,
+              phoneNumber: true
+            }
+          },
+          package: {
+            select: {
+              name: true,
+              description: true,
+              price: true,
+              duration: true,
+              barber: true
+            }
+          },
+          barber: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+              commissionRate: true
+            }
           }
         }
+      });
+
+      // If appointment is being completed with a discount code, create usage record
+      if (status === 'completed' && discountCodeId && appointment.client.id) {
+        try {
+          await tx.discountCodeUsage.create({
+            data: {
+              discountCodeId: parseInt(discountCodeId),
+              clientId: appointment.client.id,
+              appointmentId: appointment.id
+            }
+          });
+        } catch (error) {
+          // If usage record already exists (shouldn't happen with proper validation), continue
+          console.warn('Discount code usage record may already exist:', error);
+        }
       }
+
+      return appointment;
     });
 
     res.json({

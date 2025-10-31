@@ -28,6 +28,7 @@ model User {
   packages  Package[]
   barberAppointments Appointment[] @relation("AppointmentBarber")
   expenses  Expense[] @relation("ExpenseCreator")
+  discountCodes DiscountCode[] @relation("DiscountCodeCreator")
 }
 
 model Package {
@@ -59,6 +60,7 @@ model Client {
   
   // Relations
   appointments Appointment[] 
+  discountUsages DiscountCodeUsage[]
 }
 
 model Appointment {
@@ -72,6 +74,8 @@ model Appointment {
   additionalPackages Json?  
   customPackages  Json?    
   finalPrice      Float?   
+  discountCodeId  Int?     // Applied discount code
+  discountAmount  Float?   // Actual discount amount applied
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -79,6 +83,7 @@ model Appointment {
   client          Client   @relation(fields: [clientId], references: [id])
   package         Package  @relation(fields: [packageId], references: [id])
   barber          User?    @relation("AppointmentBarber", fields: [barberId], references: [id])
+  discountUsages  DiscountCodeUsage[]
 }
 
 model Expense {
@@ -93,4 +98,35 @@ model Expense {
   
   // Relations
   creator     User     @relation("ExpenseCreator", fields: [createdBy], references: [id])
+}
+
+model DiscountCode {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  description     String?
+  discountPercent Float    // Percentage discount (e.g., 10.0 for 10%)
+  isActive        Boolean  @default(true)
+  createdBy       Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  creator         User              @relation("DiscountCodeCreator", fields: [createdBy], references: [id])
+  usages          DiscountCodeUsage[]
+}
+
+model DiscountCodeUsage {
+  id             Int          @id @default(autoincrement())
+  discountCodeId Int
+  clientId       Int
+  appointmentId  Int?
+  usedAt         DateTime     @default(now())
+  
+  // Relations
+  discountCode   DiscountCode @relation(fields: [discountCodeId], references: [id])
+  client         Client       @relation(fields: [clientId], references: [id])
+  appointment    Appointment? @relation(fields: [appointmentId], references: [id])
+  
+  // Ensure one usage per client per discount code
+  @@unique([discountCodeId, clientId])
 }
