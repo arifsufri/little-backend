@@ -3,7 +3,7 @@ services:
     name: little-barbershop-api
     env: node
     plan: free
-    buildCommand: npm install && npx prisma generate && npx prisma db push --accept-data-loss
+    buildCommand: npm install && npx prisma db push --accept-data-loss --force-reset && npx prisma generate
     startCommand: npm start
     healthCheckPath: /health
     envVars:
