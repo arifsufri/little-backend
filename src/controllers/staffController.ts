@@ -113,7 +113,7 @@ export const getStaffById = async (req: Request, res: Response) => {
       role: staff.role,
       status: staff.isActive ? 'active' : 'inactive',
       joinDate: staff.createdAt.toISOString(),
-      commissionRate: staff.commissionRate || 40.0,
+      commissionRate: staff.commissionRate,
       totalAppointments: staff.barberAppointments.length,
       totalRevenue: staff.barberAppointments
         .filter(apt => apt.status === 'completed' && apt.finalPrice)
