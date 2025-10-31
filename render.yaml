@@ -3,7 +3,7 @@ services:
     name: little-barbershop-api
     env: node
     plan: free
-    buildCommand: npm install && node fix-db.js && npx prisma generate
+    buildCommand: npm install && echo "ABOUT TO RUN FIX-DB SCRIPT" && node fix-db.js && echo "FIX-DB SCRIPT COMPLETED" && npx prisma generate
     startCommand: npm start
     healthCheckPath: /health
     envVars:
