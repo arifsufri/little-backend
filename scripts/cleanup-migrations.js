@@ -1,10 +1,46 @@
-const { Client } = require('pg');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 
 async function cleanupMigrations() {
-  console.log('🚀 Starting database cleanup...');
+  console.log('🚀 Starting Prisma migration cleanup...');
   console.log('📊 Environment check:');
   console.log('- DATABASE_URL:', process.env.DATABASE_URL ? 'Present' : 'Missing');
   console.log('- NODE_ENV:', process.env.NODE_ENV);
+  
+  try {
+    // Step 1: Mark the failed migration as rolled back
+    console.log('🔄 Marking failed migration as rolled back...');
+    const rollbackResult = await execAsync('npx prisma migrate resolve --rolled-back "20241030_init"');
+    console.log('✅ Migration marked as rolled back:', rollbackResult.stdout);
+    
+    // Step 2: Add the missing commissionRate column manually using Prisma db execute
+    console.log('🔧 Adding commissionRate column...');
+    const addColumnSQL = 'ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "commissionRate" DOUBLE PRECISION DEFAULT 40.0;';
+    
+    // Write SQL to a temporary file and execute it
+    const fs = require('fs');
+    fs.writeFileSync('/tmp/add_commission_rate.sql', addColumnSQL);
+    
+    const executeResult = await execAsync('npx prisma db execute --file /tmp/add_commission_rate.sql');
+    console.log('✅ Column added successfully:', executeResult.stdout);
+    
+    // Clean up temp file
+    fs.unlinkSync('/tmp/add_commission_rate.sql');
+    
+    console.log('🎉 Migration cleanup completed successfully using Prisma commands!');
+    
+  } catch (error) {
+    console.log('❌ Error during Prisma migration cleanup:', error.message);
+    
+    // Fallback to direct database approach if Prisma commands fail
+    console.log('🔄 Falling back to direct database approach...');
+    await fallbackDirectCleanup();
+  }
+}
+
+async function fallbackDirectCleanup() {
+  const { Client } = require('pg');
   
   const client = new Client({
     connectionString: process.env.DATABASE_URL,
@@ -12,67 +48,26 @@ async function cleanupMigrations() {
   });
   
   try {
-    console.log('🔌 Connecting to database...');
     await client.connect();
-    console.log('✅ Connected to database successfully');
+    console.log('✅ Connected to database for fallback cleanup');
     
-    // First, check if _prisma_migrations table exists
-    console.log('🔍 Checking migration table...');
-    const tableCheck = await client.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = '_prisma_migrations'
-      );
+    // Mark migration as rolled back in the migrations table
+    await client.query(`
+      UPDATE "_prisma_migrations" 
+      SET finished_at = NULL, rolled_back_at = NOW() 
+      WHERE migration_name = '20241030_init'
     `);
+    console.log('✅ Migration marked as rolled back in database');
     
-    if (tableCheck.rows[0].exists) {
-      console.log('📋 Migration table found, cleaning up...');
-      
-      // Show current migrations
-      const currentMigrations = await client.query(`SELECT migration_name, finished_at FROM "_prisma_migrations" ORDER BY started_at DESC LIMIT 5`);
-      console.log('📝 Current migrations:', currentMigrations.rows);
-      
-      // Remove all migration records to start fresh
-      await client.query(`DELETE FROM "_prisma_migrations"`);
-      console.log('🗑️  All migration records cleared');
-    } else {
-      console.log('ℹ️  Migration table does not exist yet');
-    }
-    
-    // Add the commissionRate column if it doesn't exist
-    console.log('🔧 Adding commissionRate column if missing...');
+    // Add the commissionRate column
     await client.query(`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "commissionRate" DOUBLE PRECISION DEFAULT 40.0`);
-    console.log('✅ CommissionRate column operation completed');
-    
-    // Verify the column exists
-    const columnCheck = await client.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'User' AND column_name = 'commissionRate'
-    `);
-    
-    if (columnCheck.rows.length > 0) {
-      console.log('✅ CommissionRate column confirmed present');
-    } else {
-      console.log('⚠️  CommissionRate column not found - this might be expected if table doesn\'t exist yet');
-    }
-    
-    console.log('🎉 Database cleanup completed successfully!');
+    console.log('✅ CommissionRate column added');
     
   } catch (error) {
-    console.log('❌ Error during cleanup:', error.message);
-    console.log('🔍 Error details:', error);
-    
-    // Don't fail the build - this is expected in some cases
-    console.log('ℹ️  Continuing with build despite cleanup errors...');
+    console.log('❌ Fallback cleanup error:', error.message);
+    console.log('ℹ️  Continuing with build...');
   } finally {
-    try {
-      await client.end();
-      console.log('🔌 Database connection closed');
-    } catch (e) {
-      console.log('ℹ️  Connection already closed');
-    }
+    await client.end();
   }
 }
 
