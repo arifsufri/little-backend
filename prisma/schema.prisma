@@ -22,7 +22,7 @@ model User {
   avatar    String?  
   role      UserRole  @default(Client)
   isActive  Boolean   @default(false)
-  commissionRate Float? @default(40.0) // Commission percentage for Staff (e.g., 40.0 = 40%)
+  commissionRate Float? @default(40.0)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   packages  Package[]
@@ -46,32 +46,32 @@ model Package {
   
   // Relations
   creator      User          @relation(fields: [createdBy], references: [id])
-  appointments Appointment[] // Relation to appointments that book this package
+  appointments Appointment[] 
 }
 
 model Client {
   id           Int           @id @default(autoincrement())
-  clientId     String        @unique // Auto-generated format: LITTLEC1, LITTLEC2, etc.
+  clientId     String        @unique 
   fullName     String
-  phoneNumber  String        @unique // Malaysian phone format validation
+  phoneNumber  String        @unique 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   
   // Relations
-  appointments Appointment[] // Relation to appointments made by this client
+  appointments Appointment[] 
 }
 
 model Appointment {
   id              Int      @id @default(autoincrement())
   clientId        Int
   packageId       Int
-  barberId        Int?     // Selected barber (Staff user ID)
-  status          String   @default("pending") // pending, confirmed, completed, cancelled
+  barberId        Int?   
+  status          String   @default("pending") 
   appointmentDate DateTime?
   notes           String?
-  additionalPackages Json?  // Array of additional package IDs
-  customPackages  Json?    // Array of custom packages with name and price
-  finalPrice      Float?   // Final price after adjustments
+  additionalPackages Json?  
+  customPackages  Json?    
+  finalPrice      Float?   
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -83,11 +83,11 @@ model Appointment {
 
 model Expense {
   id          Int      @id @default(autoincrement())
-  category    String   // e.g., "Rent", "Utilities", "Supplies", "Marketing"
+  category    String   
   description String
   amount      Float
   date        DateTime @default(now())
-  createdBy   Int      // Boss user ID who recorded the expense
+  createdBy   Int    
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
