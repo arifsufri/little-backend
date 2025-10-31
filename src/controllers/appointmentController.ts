@@ -427,6 +427,28 @@ export const deleteAppointment = async (req: Request, res: Response) => {
       });
     }
 
+    // Check user authorization - only Boss can delete appointments
+    if ((req as any).user) {
+      const currentUser = await prisma.user.findUnique({
+        where: { id: (req as any).user.userId },
+        select: { id: true, role: true }
+      });
+      
+      if (currentUser?.role !== 'Boss') {
+        return res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only Boss can delete appointments'
+        });
+      }
+    } else {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication required'
+      });
+    }
+
     // Check if appointment exists
     const existingAppointment = await prisma.appointment.findUnique({
       where: { id: appointmentId }

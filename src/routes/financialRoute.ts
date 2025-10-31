@@ -6,7 +6,8 @@ import {
   updateCommissionRate,
   addExpense,
   getExpenses,
-  deleteExpense
+  deleteExpense,
+  resetMonthlySummary
 } from '../controllers/financialController';
 
 const router = express.Router();
@@ -17,5 +18,6 @@ router.patch('/commission/:staffId', authenticateToken, updateCommissionRate);
 router.get('/expenses', authenticateToken, getExpenses);
 router.post('/expenses', authenticateToken, addExpense);
 router.delete('/expenses/:id', authenticateToken, deleteExpense);
+router.post('/reset-monthly', authenticateToken, resetMonthlySummary);
 
 export default router;

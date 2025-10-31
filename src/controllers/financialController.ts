@@ -574,3 +574,114 @@ export const deleteExpense = async (req: AuthRequest, res: Response) => {
     });
   }
 };
+
+export const resetMonthlySummary = async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        message: 'Start date and end date are required'
+      });
+    }
+
+    // Check user authorization - only Boss can reset monthly summary
+    if ((req as any).user) {
+      const currentUser = await prisma.user.findUnique({
+        where: { id: (req as any).user.userId },
+        select: { id: true, role: true }
+      });
+      
+      if (currentUser?.role !== 'Boss') {
+        return res.status(403).json({
+          success: false,
+          error: 'Permission denied',
+          message: 'Only Boss can reset monthly summary'
+        });
+      }
+    } else {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication required'
+      });
+    }
+
+    // Convert to Malaysian timezone (GMT+8)
+    const startOfPeriod = new Date(startDate + 'T00:00:00+08:00');
+    const endOfPeriod = new Date(endDate + 'T23:59:59.999+08:00');
+
+    console.log(`Resetting monthly summary for period: ${startOfPeriod} to ${endOfPeriod}`);
+
+    // Build date filter for appointments
+    const appointmentDateFilter = {
+      OR: [
+        {
+          appointmentDate: {
+            gte: startOfPeriod,
+            lte: endOfPeriod
+          }
+        },
+        {
+          appointmentDate: null,
+          createdAt: {
+            gte: startOfPeriod,
+            lte: endOfPeriod
+          }
+        }
+      ]
+    };
+
+    // Build date filter for expenses
+    const expenseDateFilter = {
+      date: {
+        gte: startOfPeriod,
+        lte: endOfPeriod
+      }
+    };
+
+    // Start transaction to ensure data consistency
+    await prisma.$transaction(async (tx) => {
+      // 1. Reset all appointments in the date range to "pending" status
+      const appointmentUpdateResult = await tx.appointment.updateMany({
+        where: appointmentDateFilter,
+        data: {
+          status: 'pending',
+          additionalPackages: undefined,
+          customPackages: undefined,
+          finalPrice: null
+        }
+      });
+
+      // 2. Delete all expenses in the date range
+      const expenseDeleteResult = await tx.expense.deleteMany({
+        where: expenseDateFilter
+      });
+
+      console.log(`Reset complete:
+        - Updated ${appointmentUpdateResult.count} appointments to pending status
+        - Deleted ${expenseDeleteResult.count} expense records
+      `);
+    });
+
+    res.json({
+      success: true,
+      message: 'Monthly summary has been reset successfully',
+      data: {
+        period: {
+          startDate: startOfPeriod.toISOString(),
+          endDate: endOfPeriod.toISOString()
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error resetting monthly summary:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to reset monthly summary',
+      message: 'Internal server error'
+    });
+  }
+};

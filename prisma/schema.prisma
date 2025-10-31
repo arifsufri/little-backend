@@ -22,7 +22,7 @@ model User {
   avatar    String?  
   role      UserRole  @default(Client)
   isActive  Boolean   @default(false)
-  commissionRate Float?
+  commissionRate Float? @default(0.0)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   packages  Package[]

@@ -45,7 +45,7 @@ export const getAllStaff = async (req: Request, res: Response) => {
       role: member.role,
       status: member.isActive ? 'active' : 'inactive',
       joinDate: member.createdAt.toISOString(),
-      commissionRate: member.commissionRate,
+      commissionRate: member.commissionRate || 0.0,
       totalAppointments: member.barberAppointments.length,
       totalRevenue: member.barberAppointments
         .filter(apt => apt.status === 'completed' && apt.finalPrice)
@@ -113,7 +113,7 @@ export const getStaffById = async (req: Request, res: Response) => {
       role: staff.role,
       status: staff.isActive ? 'active' : 'inactive',
       joinDate: staff.createdAt.toISOString(),
-      commissionRate: staff.commissionRate,
+      commissionRate: staff.commissionRate || 0.0,
       totalAppointments: staff.barberAppointments.length,
       totalRevenue: staff.barberAppointments
         .filter(apt => apt.status === 'completed' && apt.finalPrice)
