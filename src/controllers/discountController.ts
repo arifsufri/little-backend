@@ -67,7 +67,7 @@ export const getAllDiscountCodes = async (req: AuthRequest, res: Response) => {
 // Create discount code (Boss only)
 export const createDiscountCode = async (req: AuthRequest, res: Response) => {
   try {
-    const { code, description, discountPercent } = req.body;
+    const { code, description, discountPercent, applicablePackages } = req.body;
 
     // Check if user is Boss
     const user = await prisma.user.findUnique({
@@ -116,6 +116,7 @@ export const createDiscountCode = async (req: AuthRequest, res: Response) => {
         code: code.toUpperCase(),
         description: description || null,
         discountPercent: parseFloat(discountPercent),
+        applicablePackages: applicablePackages || [],
         createdBy: req.user!.userId
       },
       include: {
@@ -153,7 +154,7 @@ export const createDiscountCode = async (req: AuthRequest, res: Response) => {
 export const updateDiscountCode = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { code, description, discountPercent, isActive } = req.body;
+    const { code, description, discountPercent, isActive, applicablePackages } = req.body;
     const discountCodeId = parseInt(id);
 
     if (isNaN(discountCodeId)) {
@@ -218,7 +219,8 @@ export const updateDiscountCode = async (req: AuthRequest, res: Response) => {
         ...(code && { code: code.toUpperCase() }),
         ...(description !== undefined && { description }),
         ...(discountPercent && { discountPercent: parseFloat(discountPercent) }),
-        ...(isActive !== undefined && { isActive })
+        ...(isActive !== undefined && { isActive }),
+        ...(applicablePackages !== undefined && { applicablePackages })
       },
       include: {
         creator: {

@@ -75,8 +75,8 @@ model Appointment {
   customPackages  Json?    
   originalPrice   Float?   // Original price before discount (for commission calculation)
   finalPrice      Float?   // Final price after discount (what client pays)
-  discountCodeId  Int?     // Applied discount code
-  discountAmount  Float?   // Actual discount amount applied
+  discountCodeId  Int?     // Applied discount code (legacy - keep for backward compatibility)
+  discountAmount  Float?   // Actual discount amount applied (legacy - keep for backward compatibility)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -85,6 +85,24 @@ model Appointment {
   package         Package  @relation(fields: [packageId], references: [id])
   barber          User?    @relation("AppointmentBarber", fields: [barberId], references: [id])
   discountUsages  DiscountCodeUsage[]
+  appliedDiscounts AppointmentDiscount[] // NEW: Multiple discount applications
+}
+
+// NEW: Model to handle multiple discount codes per appointment
+model AppointmentDiscount {
+  id             Int          @id @default(autoincrement())
+  appointmentId  Int
+  discountCodeId Int
+  appliedToPackages Json      // Array of package IDs this discount was applied to
+  discountAmount Float       // Amount discounted by this specific code
+  createdAt      DateTime    @default(now())
+  
+  // Relations
+  appointment    Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  discountCode   DiscountCode @relation(fields: [discountCodeId], references: [id])
+  
+  // Ensure one discount code per appointment (but allow multiple different codes)
+  @@unique([appointmentId, discountCodeId])
 }
 
 model Expense {
@@ -107,6 +125,7 @@ model DiscountCode {
   description     String?
   discountPercent Float    // Percentage discount (e.g., 10.0 for 10%)
   isActive        Boolean  @default(true)
+  applicablePackages Int[] @default([]) // Array of package IDs this discount applies to (empty = all packages)
   createdBy       Int
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -114,6 +133,7 @@ model DiscountCode {
   // Relations
   creator         User              @relation("DiscountCodeCreator", fields: [createdBy], references: [id])
   usages          DiscountCodeUsage[]
+  appointmentDiscounts AppointmentDiscount[] // NEW: Multiple discount applications
 }
 
 model DiscountCodeUsage {

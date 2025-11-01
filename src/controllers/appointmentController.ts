@@ -3,6 +3,90 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+// Helper function to apply multiple discount codes
+const applyMultipleDiscounts = async (
+  appointmentId: number,
+  discountCodes: Array<{
+    code: string;
+    appliedToPackages: number[];
+  }>,
+  clientId: number,
+  packageId: number,
+  additionalPackages: number[] = []
+) => {
+  const appliedDiscounts = [];
+  let totalDiscountAmount = 0;
+
+  for (const discountRequest of discountCodes) {
+    // Find the discount code
+    const discountCode = await prisma.discountCode.findUnique({
+      where: { 
+        code: discountRequest.code,
+        isActive: true 
+      }
+    });
+
+    if (!discountCode) {
+      throw new Error(`Discount code "${discountRequest.code}" not found or inactive`);
+    }
+
+    // Check if client has already used this discount code
+    const existingUsage = await prisma.discountCodeUsage.findUnique({
+      where: {
+        discountCodeId_clientId: {
+          discountCodeId: discountCode.id,
+          clientId: clientId
+        }
+      }
+    });
+
+    if (existingUsage) {
+      throw new Error(`Client has already used discount code "${discountRequest.code}"`);
+    }
+
+    // Validate applicable packages
+    if (discountCode.applicablePackages && discountCode.applicablePackages.length > 0) {
+      const requestedPackages = discountRequest.appliedToPackages;
+      const invalidPackages = requestedPackages.filter(
+        pkgId => !discountCode.applicablePackages.includes(pkgId)
+      );
+      
+      if (invalidPackages.length > 0) {
+        throw new Error(`Discount code "${discountRequest.code}" does not apply to some selected packages`);
+      }
+    }
+
+    // Calculate discount amount for this code
+    let discountableAmount = 0;
+    
+    // Get package prices
+    const allPackageIds = [packageId, ...additionalPackages];
+    const packages = await prisma.package.findMany({
+      where: { id: { in: allPackageIds } }
+    });
+
+    // Calculate discountable amount for this specific discount
+    for (const pkgId of discountRequest.appliedToPackages) {
+      const pkg = packages.find(p => p.id === pkgId);
+      if (pkg) {
+        discountableAmount += pkg.price;
+      }
+    }
+
+    const discountAmount = Math.round((discountableAmount * discountCode.discountPercent / 100) * 100) / 100;
+    totalDiscountAmount += discountAmount;
+
+    appliedDiscounts.push({
+      discountCodeId: discountCode.id,
+      appliedToPackages: discountRequest.appliedToPackages,
+      discountAmount: discountAmount,
+      code: discountRequest.code
+    });
+  }
+
+  return { appliedDiscounts, totalDiscountAmount };
+};
+
 export const createAppointment = async (req: Request, res: Response) => {
   try {
     const { clientId, packageId, barberId, additionalPackages, appointmentDate, notes, discountCode } = req.body;
@@ -83,7 +167,7 @@ export const createAppointment = async (req: Request, res: Response) => {
     }
 
     // Handle discount code if provided
-    let discountCodeData = null;
+    let discountCodeData: any = null;
     let discountAmount = 0;
     let finalPrice = originalPrice;
 
@@ -114,8 +198,44 @@ export const createAppointment = async (req: Request, res: Response) => {
           });
         }
 
-        // Calculate discount amount
-        discountAmount = Math.round((originalPrice * discountCodeData.discountPercent / 100) * 100) / 100;
+        // Check if discount applies to selected packages
+        if (discountCodeData.applicablePackages && discountCodeData.applicablePackages.length > 0) {
+          // Check if base package is applicable
+          const basePackageApplicable = discountCodeData.applicablePackages.includes(parseInt(packageId));
+          
+          // Check additional packages
+          const applicableAdditionalPackages = additionalPackages ? 
+            additionalPackages.filter((id: any) => discountCodeData.applicablePackages.includes(id)) : [];
+          
+          if (!basePackageApplicable && applicableAdditionalPackages.length === 0) {
+            return res.status(400).json({
+              success: false,
+              error: 'Discount not applicable',
+              message: 'This discount code does not apply to any of the selected packages'
+            });
+          }
+          
+          // Calculate discount only on applicable packages
+          let discountableAmount = 0;
+          
+          if (basePackageApplicable) {
+            discountableAmount += packageData.price;
+          }
+          
+          // Add applicable additional packages
+          if (applicableAdditionalPackages.length > 0) {
+            const applicablePackageDetails = await prisma.package.findMany({
+              where: { id: { in: applicableAdditionalPackages } }
+            });
+            discountableAmount += applicablePackageDetails.reduce((sum, pkg) => sum + pkg.price, 0);
+          }
+          
+          discountAmount = Math.round((discountableAmount * discountCodeData.discountPercent / 100) * 100) / 100;
+        } else {
+          // Apply to all packages (backward compatibility)
+          discountAmount = Math.round((originalPrice * discountCodeData.discountPercent / 100) * 100) / 100;
+        }
+        
         finalPrice = originalPrice - discountAmount;
       } else {
         return res.status(404).json({
@@ -224,6 +344,17 @@ export const getAllAppointments = async (req: Request, res: Response) => {
             role: true,
             commissionRate: true
           }
+        },
+        appliedDiscounts: {
+          include: {
+            discountCode: {
+              select: {
+                id: true,
+                code: true,
+                discountPercent: true
+              }
+            }
+          }
         }
       }
     });
@@ -304,7 +435,7 @@ export const getAppointmentById = async (req: Request, res: Response) => {
 export const updateAppointmentStatus = async (req: Request, res: Response) => {
   try {
     const appointmentId = parseInt(req.params.id);
-    const { status, appointmentDate, notes, additionalPackages, customPackages, finalPrice, barberId, discountCodeId, discountAmount } = req.body;
+    const { status, appointmentDate, notes, additionalPackages, customPackages, finalPrice, barberId, discountCodeId, discountAmount, multipleDiscountCodes } = req.body;
 
     if (isNaN(appointmentId)) {
       return res.status(400).json({
@@ -463,8 +594,49 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
         }
       });
 
-      // If appointment is being completed with a discount code, create usage record
-      if (status === 'completed' && discountCodeId && appointment.client.id) {
+      // Handle multiple discount codes if provided
+      if (status === 'completed' && multipleDiscountCodes && Array.isArray(multipleDiscountCodes) && multipleDiscountCodes.length > 0) {
+        try {
+          const packageIds = [appointment.packageId];
+          if (additionalPackages && Array.isArray(additionalPackages)) {
+            packageIds.push(...additionalPackages.map((id: any) => parseInt(id)));
+          }
+
+          const { appliedDiscounts } = await applyMultipleDiscounts(
+            appointment.id,
+            multipleDiscountCodes,
+            appointment.client.id,
+            appointment.packageId,
+            additionalPackages ? additionalPackages.map((id: any) => parseInt(id)) : []
+          );
+
+          // Create AppointmentDiscount records
+          for (const discount of appliedDiscounts) {
+            await tx.appointmentDiscount.create({
+              data: {
+                appointmentId: appointment.id,
+                discountCodeId: discount.discountCodeId,
+                appliedToPackages: discount.appliedToPackages,
+                discountAmount: discount.discountAmount
+              }
+            });
+
+            // Create DiscountCodeUsage record
+            await tx.discountCodeUsage.create({
+              data: {
+                discountCodeId: discount.discountCodeId,
+                clientId: appointment.client.id,
+                appointmentId: appointment.id
+              }
+            });
+          }
+        } catch (error: any) {
+          console.error('Error applying multiple discount codes:', error);
+          throw new Error(`Failed to apply discount codes: ${error.message}`);
+        }
+      }
+      // Legacy single discount code support
+      else if (status === 'completed' && discountCodeId && appointment.client.id) {
         try {
           await tx.discountCodeUsage.create({
             data: {
@@ -508,7 +680,9 @@ export const editAppointment = async (req: Request, res: Response) => {
       appointmentDate, 
       notes, 
       discountCode,
-      removeDiscount 
+      discountAppliedTo,
+      removeDiscount,
+      multipleDiscountCodes 
     } = req.body;
 
     if (isNaN(appointmentId)) {
@@ -625,7 +799,7 @@ export const editAppointment = async (req: Request, res: Response) => {
     }
 
     // Handle discount code changes
-    let discountCodeData = null;
+    let discountCodeData: any = null;
     let discountAmount = 0;
     let finalPrice = originalPrice;
     let newDiscountCodeId = existingAppointment.discountCodeId;
@@ -676,8 +850,51 @@ export const editAppointment = async (req: Request, res: Response) => {
           });
         }
 
-        // Calculate discount amount
-        discountAmount = Math.round((originalPrice * discountCodeData.discountPercent / 100) * 100) / 100;
+        // Check if discount applies to any of the selected packages (if applicablePackages is set)
+        if (discountCodeData.applicablePackages && discountCodeData.applicablePackages.length > 0) {
+          const targetPackageId = packageId ? parseInt(packageId) : existingAppointment.packageId;
+          const targetAdditionalPackages = additionalPackages || existingAppointment.additionalPackages || [];
+          
+          // Check if base package is applicable
+          const basePackageApplicable = discountCodeData.applicablePackages.includes(targetPackageId);
+          
+          // Check additional packages
+          const applicableAdditionalPackages = targetAdditionalPackages.filter((id: any) => 
+            discountCodeData.applicablePackages.includes(id)
+          );
+          
+          if (!basePackageApplicable && applicableAdditionalPackages.length === 0) {
+            return res.status(400).json({
+              success: false,
+              error: 'Discount not applicable',
+              message: 'This discount code does not apply to any of the selected packages'
+            });
+          }
+        }
+
+        // Calculate discount amount based on selected packages
+        let discountableAmount = 0;
+
+        // Add base package if selected for discount
+        if (discountAppliedTo?.basePackage) {
+          const basePackage = await prisma.package.findUnique({
+            where: { id: packageId ? parseInt(packageId) : existingAppointment.packageId }
+          });
+          if (basePackage) {
+            discountableAmount += basePackage.price;
+          }
+        }
+        
+        // Add selected additional packages
+        if (discountAppliedTo?.additionalPackages && Array.isArray(discountAppliedTo.additionalPackages)) {
+          const selectedAdditionalPackages = await prisma.package.findMany({
+            where: { id: { in: discountAppliedTo.additionalPackages } }
+          });
+          discountableAmount += selectedAdditionalPackages.reduce((sum, pkg) => sum + pkg.price, 0);
+        }
+        
+        // Calculate discount only on selected packages
+        discountAmount = Math.round((discountableAmount * discountCodeData.discountPercent / 100) * 100) / 100;
         finalPrice = originalPrice - discountAmount;
         newDiscountCodeId = discountCodeData.id;
 
@@ -726,6 +943,63 @@ export const editAppointment = async (req: Request, res: Response) => {
           success: false,
           error: 'Invalid discount code',
           message: 'Discount code not found or inactive'
+        });
+      }
+    }
+    // Handle multiple discount codes (new feature)
+    else if (multipleDiscountCodes && Array.isArray(multipleDiscountCodes) && multipleDiscountCodes.length > 0) {
+      try {
+        const targetClientId = clientId ? parseInt(clientId) : existingAppointment.clientId;
+        const targetPackageId = packageId ? parseInt(packageId) : existingAppointment.packageId;
+        const targetAdditionalPackages = additionalPackages || existingAppointment.additionalPackages || [];
+
+        // Clear existing appointment discounts
+        await prisma.appointmentDiscount.deleteMany({
+          where: { appointmentId: appointmentId }
+        });
+
+        // Clear existing discount usages for this appointment
+        await prisma.discountCodeUsage.deleteMany({
+          where: { appointmentId: appointmentId }
+        });
+
+        const { appliedDiscounts, totalDiscountAmount } = await applyMultipleDiscounts(
+          appointmentId,
+          multipleDiscountCodes,
+          targetClientId,
+          targetPackageId,
+          targetAdditionalPackages.map((id: any) => parseInt(id))
+        );
+
+        // Create new AppointmentDiscount records
+        for (const discount of appliedDiscounts) {
+          await prisma.appointmentDiscount.create({
+            data: {
+              appointmentId: appointmentId,
+              discountCodeId: discount.discountCodeId,
+              appliedToPackages: discount.appliedToPackages,
+              discountAmount: discount.discountAmount
+            }
+          });
+
+          // Create DiscountCodeUsage record
+          await prisma.discountCodeUsage.create({
+            data: {
+              discountCodeId: discount.discountCodeId,
+              clientId: targetClientId,
+              appointmentId: appointmentId
+            }
+          });
+        }
+
+        discountAmount = totalDiscountAmount;
+        finalPrice = originalPrice - totalDiscountAmount;
+        newDiscountCodeId = null; // Clear legacy discount code ID when using multiple
+      } catch (error: any) {
+        return res.status(400).json({
+          success: false,
+          error: 'Failed to apply discount codes',
+          message: error.message
         });
       }
     }
