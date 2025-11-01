@@ -451,7 +451,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
       });
     }
 
-    // Check user authorization - only Boss can delete appointments
+    // Check user authorization - only Boss can delete appointment
     if ((req as any).user) {
       const currentUser = await prisma.user.findUnique({
         where: { id: (req as any).user.userId },
