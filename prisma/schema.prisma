@@ -150,6 +150,5 @@ model DiscountCodeUsage {
   client         Client       @relation(fields: [clientId], references: [id])
   appointment    Appointment? @relation(fields: [appointmentId], references: [id])
   
-  // Ensure one usage per client per discount code
-  @@unique([discountCodeId, clientId])
+  // Allow multiple uses of the same discount code by the same client
 }

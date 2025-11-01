@@ -30,19 +30,7 @@ const applyMultipleDiscounts = async (
       throw new Error(`Discount code "${discountRequest.code}" not found or inactive`);
     }
 
-    // Check if client has already used this discount code
-    const existingUsage = await prisma.discountCodeUsage.findUnique({
-      where: {
-        discountCodeId_clientId: {
-          discountCodeId: discountCode.id,
-          clientId: clientId
-        }
-      }
-    });
-
-    if (existingUsage) {
-      throw new Error(`Client has already used discount code "${discountRequest.code}"`);
-    }
+    // Note: Discount codes can now be used multiple times by the same client
 
     // Validate applicable packages
     if (discountCode.applicablePackages && discountCode.applicablePackages.length > 0) {
@@ -189,23 +177,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       });
 
       if (discountCodeData) {
-        // Check if client has already used this discount code
-        const existingUsage = await prisma.discountCodeUsage.findUnique({
-          where: {
-            discountCodeId_clientId: {
-              discountCodeId: discountCodeData.id,
-              clientId: parseInt(clientId)
-            }
-          }
-        });
-
-        if (existingUsage) {
-          return res.status(400).json({
-            success: false,
-            error: 'Discount code already used',
-            message: 'This client has already used this discount code'
-          });
-        }
+        // Note: Discount codes can now be used multiple times by the same client
 
         // Check if discount applies to selected packages
         if (discountCodeData.applicablePackages && discountCodeData.applicablePackages.length > 0) {
@@ -851,22 +823,7 @@ export const editAppointment = async (req: Request, res: Response) => {
       if (discountCodeData) {
         const targetClientId = clientId ? parseInt(clientId) : existingAppointment.clientId;
         
-        // Check if client has already used this discount code (excluding current appointment)
-        const existingUsage = await prisma.discountCodeUsage.findFirst({
-          where: {
-            discountCodeId: discountCodeData.id,
-            clientId: targetClientId,
-            appointmentId: { not: appointmentId }
-          }
-        });
-
-        if (existingUsage) {
-          return res.status(400).json({
-            success: false,
-            error: 'Discount code already used',
-            message: 'This client has already used this discount code'
-          });
-        }
+        // Note: Discount codes can now be used multiple times by the same client
 
         // Check if discount applies to any of the selected packages (if applicablePackages is set)
         if (discountCodeData.applicablePackages && discountCodeData.applicablePackages.length > 0) {

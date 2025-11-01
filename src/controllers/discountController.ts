@@ -408,14 +408,7 @@ export const validateDiscountCode = async (req: Request, res: Response) => {
       });
     }
 
-    // Check if client has already used this code
-    if (discountCode.usages.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Code already used',
-        message: 'You have already used this discount code'
-      });
-    }
+    // Note: Discount codes can now be used multiple times by the same client
 
     res.json({
       success: true,
