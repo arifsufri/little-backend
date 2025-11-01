@@ -153,7 +153,11 @@ export const getAllClients = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
       include: {
         appointments: {
-          include: {
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            finalPrice: true,
             package: {
               select: {
                 name: true,
@@ -196,7 +200,11 @@ export const getClientById = async (req: Request, res: Response) => {
       where: { id: clientId },
       include: {
         appointments: {
-          include: {
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            finalPrice: true,
             package: {
               select: {
                 name: true,
