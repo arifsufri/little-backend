@@ -423,7 +423,9 @@ export const validateDiscountCode = async (req: Request, res: Response) => {
         id: discountCode.id,
         code: discountCode.code,
         description: discountCode.description,
-        discountPercent: discountCode.discountPercent
+        discountType: discountCode.discountType,
+        discountPercent: discountCode.discountPercent,
+        discountAmount: discountCode.discountAmount
       },
       message: 'Discount code is valid'
     });
