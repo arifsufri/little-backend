@@ -67,7 +67,7 @@ export const getAllDiscountCodes = async (req: AuthRequest, res: Response) => {
 // Create discount code (Boss only)
 export const createDiscountCode = async (req: AuthRequest, res: Response) => {
   try {
-    const { code, description, discountPercent, applicablePackages } = req.body;
+    const { code, description, discountType, discountPercent, discountAmount, applicablePackages } = req.body;
 
     // Check if user is Boss
     const user = await prisma.user.findUnique({
@@ -82,20 +82,40 @@ export const createDiscountCode = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (!code || !discountPercent) {
+    if (!code) {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields',
-        message: 'Code and discount percentage are required'
+        message: 'Code is required'
       });
     }
 
-    if (discountPercent < 0 || discountPercent > 100) {
+    // Validate discount type and values
+    const type = discountType || 'percentage';
+    if (!['percentage', 'fixed_amount'].includes(type)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid discount percentage',
-        message: 'Discount percentage must be between 0 and 100'
+        error: 'Invalid discount type',
+        message: 'Discount type must be either "percentage" or "fixed_amount"'
       });
+    }
+
+    if (type === 'percentage') {
+      if (!discountPercent || discountPercent < 0 || discountPercent > 100) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid discount percentage',
+          message: 'Discount percentage must be between 0 and 100'
+        });
+      }
+    } else if (type === 'fixed_amount') {
+      if (!discountAmount || discountAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid discount amount',
+          message: 'Discount amount must be greater than 0'
+        });
+      }
     }
 
     // Check if code already exists
@@ -115,7 +135,9 @@ export const createDiscountCode = async (req: AuthRequest, res: Response) => {
       data: {
         code: code.toUpperCase(),
         description: description || null,
-        discountPercent: parseFloat(discountPercent),
+        discountType: type,
+        discountPercent: type === 'percentage' ? parseFloat(discountPercent) : null,
+        discountAmount: type === 'fixed_amount' ? parseFloat(discountAmount) : null,
         applicablePackages: applicablePackages || [],
         createdBy: req.user!.userId
       },
@@ -154,7 +176,7 @@ export const createDiscountCode = async (req: AuthRequest, res: Response) => {
 export const updateDiscountCode = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { code, description, discountPercent, isActive, applicablePackages } = req.body;
+    const { code, description, discountType, discountPercent, discountAmount, isActive, applicablePackages } = req.body;
     const discountCodeId = parseInt(id);
 
     if (isNaN(discountCodeId)) {
@@ -205,11 +227,28 @@ export const updateDiscountCode = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    if (discountPercent && (discountPercent < 0 || discountPercent > 100)) {
+    // Validate discount type and values if provided
+    if (discountType && !['percentage', 'fixed_amount'].includes(discountType)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid discount type',
+        message: 'Discount type must be either "percentage" or "fixed_amount"'
+      });
+    }
+
+    if (discountPercent !== undefined && (discountPercent < 0 || discountPercent > 100)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid discount percentage',
         message: 'Discount percentage must be between 0 and 100'
+      });
+    }
+
+    if (discountAmount !== undefined && discountAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid discount amount',
+        message: 'Discount amount must be greater than 0'
       });
     }
 
@@ -218,7 +257,9 @@ export const updateDiscountCode = async (req: AuthRequest, res: Response) => {
       data: {
         ...(code && { code: code.toUpperCase() }),
         ...(description !== undefined && { description }),
-        ...(discountPercent && { discountPercent: parseFloat(discountPercent) }),
+        ...(discountType && { discountType }),
+        ...(discountPercent !== undefined && { discountPercent: parseFloat(discountPercent) }),
+        ...(discountAmount !== undefined && { discountAmount: parseFloat(discountAmount) }),
         ...(isActive !== undefined && { isActive }),
         ...(applicablePackages !== undefined && { applicablePackages })
       },

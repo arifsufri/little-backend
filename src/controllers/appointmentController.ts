@@ -73,7 +73,16 @@ const applyMultipleDiscounts = async (
       }
     }
 
-    const discountAmount = Math.round((discountableAmount * discountCode.discountPercent / 100) * 100) / 100;
+    // Calculate discount amount based on discount type
+    let discountAmount = 0;
+    if (discountCode.discountType === 'fixed_amount') {
+      // For fixed amount, apply the discount amount directly (but don't exceed the discountable amount)
+      discountAmount = Math.min(discountCode.discountAmount || 0, discountableAmount);
+    } else {
+      // For percentage discount (default)
+      const percentage = discountCode.discountPercent || 0;
+      discountAmount = Math.round((discountableAmount * percentage / 100) * 100) / 100;
+    }
     totalDiscountAmount += discountAmount;
 
     appliedDiscounts.push({
@@ -230,10 +239,19 @@ export const createAppointment = async (req: Request, res: Response) => {
             discountableAmount += applicablePackageDetails.reduce((sum, pkg) => sum + pkg.price, 0);
           }
           
-          discountAmount = Math.round((discountableAmount * discountCodeData.discountPercent / 100) * 100) / 100;
+          // Calculate discount based on discount type
+          if (discountCodeData.discountType === 'fixed_amount') {
+            discountAmount = Math.min(discountCodeData.discountAmount || 0, discountableAmount);
+          } else {
+            discountAmount = Math.round((discountableAmount * (discountCodeData.discountPercent || 0) / 100) * 100) / 100;
+          }
         } else {
           // Apply to all packages (backward compatibility)
-          discountAmount = Math.round((originalPrice * discountCodeData.discountPercent / 100) * 100) / 100;
+          if (discountCodeData.discountType === 'fixed_amount') {
+            discountAmount = Math.min(discountCodeData.discountAmount || 0, originalPrice);
+          } else {
+            discountAmount = Math.round((originalPrice * (discountCodeData.discountPercent || 0) / 100) * 100) / 100;
+          }
         }
         
         finalPrice = originalPrice - discountAmount;

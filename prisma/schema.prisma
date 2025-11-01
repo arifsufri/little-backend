@@ -123,7 +123,9 @@ model DiscountCode {
   id              Int      @id @default(autoincrement())
   code            String   @unique
   description     String?
-  discountPercent Float    // Percentage discount (e.g., 10.0 for 10%)
+  discountType    String   @default("percentage")
+  discountPercent Float?   
+  discountAmount  Float?  
   isActive        Boolean  @default(true)
   applicablePackages Int[] @default([]) // Array of package IDs this discount applies to (empty = all packages)
   createdBy       Int
