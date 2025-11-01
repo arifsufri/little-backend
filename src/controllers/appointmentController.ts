@@ -681,35 +681,46 @@ export const editAppointment = async (req: Request, res: Response) => {
         finalPrice = originalPrice - discountAmount;
         newDiscountCodeId = discountCodeData.id;
 
-        // Remove old discount usage if exists and different
-        if (existingAppointment.discountCodeId && existingAppointment.discountCodeId !== discountCodeData.id) {
-          await prisma.discountCodeUsage.deleteMany({
-            where: {
-              discountCodeId: existingAppointment.discountCodeId,
-              clientId: existingAppointment.clientId,
-              appointmentId: appointmentId
-            }
-          });
-        }
-
-        // Create new discount usage record if it doesn't exist
-        const currentUsage = await prisma.discountCodeUsage.findFirst({
-          where: {
-            discountCodeId: discountCodeData.id,
-            clientId: targetClientId,
-            appointmentId: appointmentId
+        // Handle discount usage record updates
+        if (existingAppointment.discountCodeId !== discountCodeData.id) {
+          // Remove old discount usage if different discount code
+          if (existingAppointment.discountCodeId) {
+            await prisma.discountCodeUsage.deleteMany({
+              where: {
+                discountCodeId: existingAppointment.discountCodeId,
+                clientId: existingAppointment.clientId,
+                appointmentId: appointmentId
+              }
+            });
           }
-        });
 
-        if (!currentUsage) {
-          await prisma.discountCodeUsage.create({
-            data: {
-              discountCodeId: discountCodeData.id,
-              clientId: targetClientId,
-              appointmentId: appointmentId
+          // Create new discount usage record
+          try {
+            await prisma.discountCodeUsage.create({
+              data: {
+                discountCodeId: discountCodeData.id,
+                clientId: targetClientId,
+                appointmentId: appointmentId
+              }
+            });
+          } catch (error: any) {
+            // If unique constraint fails, try to update existing record
+            if (error.code === 'P2002') {
+              await prisma.discountCodeUsage.updateMany({
+                where: {
+                  discountCodeId: discountCodeData.id,
+                  clientId: targetClientId
+                },
+                data: {
+                  appointmentId: appointmentId
+                }
+              });
+            } else {
+              throw error;
             }
-          });
+          }
         }
+        // If same discount code, no need to update usage record
       } else {
         return res.status(404).json({
           success: false,
