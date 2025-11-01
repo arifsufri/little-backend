@@ -5,6 +5,7 @@ import {
   getAllAppointments,
   getAppointmentById,
   updateAppointmentStatus,
+  editAppointment,
   deleteAppointment,
   getClientAppointments
 } from '../controllers/appointmentController';
@@ -19,6 +20,7 @@ router.get('/client/:clientId', getClientAppointments);
 router.get('/', authenticateToken, getAllAppointments);
 router.get('/:id', authenticateToken, getAppointmentById);
 router.put('/:id', authenticateToken, updateAppointmentStatus);
+router.patch('/:id', authenticateToken, editAppointment);
 router.delete('/:id', authenticateToken, deleteAppointment);
 
 export default router;

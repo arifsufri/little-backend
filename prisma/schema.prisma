@@ -73,7 +73,8 @@ model Appointment {
   notes           String?
   additionalPackages Json?  
   customPackages  Json?    
-  finalPrice      Float?   
+  originalPrice   Float?   // Original price before discount (for commission calculation)
+  finalPrice      Float?   // Final price after discount (what client pays)
   discountCodeId  Int?     // Applied discount code
   discountAmount  Float?   // Actual discount amount applied
   createdAt       DateTime @default(now())

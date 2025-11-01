@@ -70,10 +70,11 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
       (sum, apt) => sum + (apt.finalPrice || 0), 0
     );
 
-    // Calculate total commission paid
+    // Calculate total commission paid (based on original price, not discounted price)
     const totalCommissionPaid = completedAppointments.reduce((sum, apt) => {
       if (apt.barber && apt.barber.commissionRate) {
-        return sum + ((apt.finalPrice || 0) * (apt.barber.commissionRate / 100));
+        const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
+        return sum + (priceForCommission * (apt.barber.commissionRate / 100));
       }
       return sum;
     }, 0);
@@ -165,7 +166,9 @@ async function getBarberPerformance(dateFilter: any) {
   return barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const totalSales = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
-    const commissionPaid = totalSales * ((barber.commissionRate || 0) / 100);
+    // Commission calculated on original price, not discounted price
+    const totalCommissionBase = appointments.reduce((sum, apt) => sum + (apt.originalPrice || apt.finalPrice || 0), 0);
+    const commissionPaid = totalCommissionBase * ((barber.commissionRate || 0) / 100);
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
     return {
@@ -290,15 +293,19 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
     // Calculate earnings
     const totalCustomers = appointments.length;
     const totalRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
+    // Commission calculated on original price, not discounted price
+    const totalCommissionBase = appointments.reduce((sum, apt) => sum + (apt.originalPrice || apt.finalPrice || 0), 0);
     const commissionRate = user.commissionRate || 0;
-    const totalEarnings = totalRevenue * (commissionRate / 100);
+    const totalEarnings = totalCommissionBase * (commissionRate / 100);
 
     // Service breakdown
     const serviceMap = new Map();
     appointments.forEach(apt => {
       const serviceName = apt.package.name;
       const servicePrice = apt.finalPrice || 0;
-      const barberShare = servicePrice * (commissionRate / 100);
+      // Commission calculated on original price, not discounted price
+      const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
+      const barberShare = priceForCommission * (commissionRate / 100);
 
       if (!serviceMap.has(serviceName)) {
         serviceMap.set(serviceName, {
@@ -321,7 +328,9 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
     const dailyEarnings = new Map();
     appointments.forEach(apt => {
       const date = apt.appointmentDate?.toISOString().split('T')[0] || new Date().toISOString().split('T')[0];
-      const earnings = (apt.finalPrice || 0) * (commissionRate / 100);
+      // Commission calculated on original price, not discounted price
+      const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
+      const earnings = priceForCommission * (commissionRate / 100);
 
       if (!dailyEarnings.has(date)) {
         dailyEarnings.set(date, {
@@ -357,7 +366,8 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
           client: apt.client.fullName,
           service: apt.package.name,
           totalPrice: apt.finalPrice,
-          earnings: (apt.finalPrice || 0) * (commissionRate / 100)
+          // Commission calculated on original price, not discounted price
+          earnings: (apt.originalPrice || apt.finalPrice || 0) * (commissionRate / 100)
         }))
       }
     });

@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 
 export const createAppointment = async (req: Request, res: Response) => {
   try {
-    const { clientId, packageId, barberId, additionalPackages, appointmentDate, notes } = req.body;
+    const { clientId, packageId, barberId, additionalPackages, appointmentDate, notes, discountCode } = req.body;
 
     if (!clientId || !packageId) {
       return res.status(400).json({
@@ -63,7 +63,7 @@ export const createAppointment = async (req: Request, res: Response) => {
 
     // Verify additional packages if provided
     let additionalPackagesData = [];
-    let totalPrice = packageData.price;
+    let originalPrice = packageData.price;
 
     if (additionalPackages && Array.isArray(additionalPackages) && additionalPackages.length > 0) {
       additionalPackagesData = await prisma.package.findMany({
@@ -78,8 +78,52 @@ export const createAppointment = async (req: Request, res: Response) => {
         });
       }
 
-      // Calculate total price
-      totalPrice += additionalPackagesData.reduce((sum, pkg) => sum + pkg.price, 0);
+      // Calculate original total price
+      originalPrice += additionalPackagesData.reduce((sum, pkg) => sum + pkg.price, 0);
+    }
+
+    // Handle discount code if provided
+    let discountCodeData = null;
+    let discountAmount = 0;
+    let finalPrice = originalPrice;
+
+    if (discountCode) {
+      discountCodeData = await prisma.discountCode.findUnique({
+        where: { 
+          code: discountCode,
+          isActive: true 
+        }
+      });
+
+      if (discountCodeData) {
+        // Check if client has already used this discount code
+        const existingUsage = await prisma.discountCodeUsage.findUnique({
+          where: {
+            discountCodeId_clientId: {
+              discountCodeId: discountCodeData.id,
+              clientId: parseInt(clientId)
+            }
+          }
+        });
+
+        if (existingUsage) {
+          return res.status(400).json({
+            success: false,
+            error: 'Discount code already used',
+            message: 'This client has already used this discount code'
+          });
+        }
+
+        // Calculate discount amount
+        discountAmount = Math.round((originalPrice * discountCodeData.discountPercent / 100) * 100) / 100;
+        finalPrice = originalPrice - discountAmount;
+      } else {
+        return res.status(404).json({
+          success: false,
+          error: 'Invalid discount code',
+          message: 'Discount code not found or inactive'
+        });
+      }
     }
 
     // Create appointment
@@ -91,7 +135,10 @@ export const createAppointment = async (req: Request, res: Response) => {
         appointmentDate: appointmentDate ? new Date(appointmentDate) : null,
         notes: notes || null,
         additionalPackages: additionalPackages || null,
-        finalPrice: totalPrice,
+        originalPrice: originalPrice,
+        finalPrice: finalPrice,
+        discountCodeId: discountCodeData?.id || null,
+        discountAmount: discountAmount || null,
         status: 'pending'
       },
       include: {
@@ -121,6 +168,17 @@ export const createAppointment = async (req: Request, res: Response) => {
         }
       }
     });
+
+    // Create discount code usage record if discount was applied
+    if (discountCodeData) {
+      await prisma.discountCodeUsage.create({
+        data: {
+          discountCodeId: discountCodeData.id,
+          clientId: parseInt(clientId),
+          appointmentId: appointment.id
+        }
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -370,7 +428,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // Update appointment (with discount code usage tracking)
+    // Update appointment (with discount code usage tra cking)
     const updatedAppointment = await prisma.$transaction(async (tx) => {
       // Update the appointment
       const appointment = await tx.appointment.update({
@@ -434,6 +492,294 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: 'Failed to update appointment',
+      message: 'Internal server error'
+    });
+  }
+};
+
+export const editAppointment = async (req: Request, res: Response) => {
+  try {
+    const appointmentId = parseInt(req.params.id);
+    const { 
+      clientId, 
+      packageId, 
+      barberId, 
+      additionalPackages, 
+      appointmentDate, 
+      notes, 
+      discountCode,
+      removeDiscount 
+    } = req.body;
+
+    if (isNaN(appointmentId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid appointment ID',
+        message: 'Appointment ID must be a valid number'
+      });
+    }
+
+    // Check user authorization - Boss and Staff can edit appointments
+    if ((req as any).user) {
+      const currentUser = await prisma.user.findUnique({
+        where: { id: (req as any).user.userId },
+        select: { id: true, role: true }
+      });
+
+      if (!currentUser || !['Boss', 'Staff'].includes(currentUser.role)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Unauthorized',
+          message: 'Only Boss and Staff can edit appointments'
+        });
+      }
+    }
+
+    // Get existing appointment
+    const existingAppointment = await prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      include: {
+        client: true,
+        package: true,
+        barber: true
+      }
+    });
+
+    if (!existingAppointment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Appointment not found',
+        message: 'No appointment found with the specified ID'
+      });
+    }
+
+    // Verify client exists if being updated
+    if (clientId && clientId !== existingAppointment.clientId) {
+      const client = await prisma.client.findUnique({
+        where: { id: parseInt(clientId) }
+      });
+
+      if (!client) {
+        return res.status(404).json({
+          success: false,
+          error: 'Client not found',
+          message: 'No client found with the specified ID'
+        });
+      }
+    }
+
+    // Verify package exists if being updated
+    let packageData = existingAppointment.package;
+    if (packageId && packageId !== existingAppointment.packageId) {
+      const newPackage = await prisma.package.findUnique({
+        where: { id: parseInt(packageId) }
+      });
+
+      if (!newPackage) {
+        return res.status(404).json({
+          success: false,
+          error: 'Package not found',
+          message: 'No package found with the specified ID'
+        });
+      }
+      packageData = newPackage;
+    }
+
+    // Verify barber exists if being updated
+    if (barberId && barberId !== existingAppointment.barberId) {
+      const barber = await prisma.user.findUnique({
+        where: { 
+          id: parseInt(barberId),
+          role: { in: ['Boss', 'Staff'] },
+          isActive: true
+        }
+      });
+
+      if (!barber) {
+        return res.status(404).json({
+          success: false,
+          error: 'Barber not found',
+          message: 'No active barber found with the specified ID'
+        });
+      }
+    }
+
+    // Calculate new prices
+    let originalPrice = packageData.price;
+    const updatedAdditionalPackages = additionalPackages !== undefined ? additionalPackages : existingAppointment.additionalPackages;
+
+    if (updatedAdditionalPackages && Array.isArray(updatedAdditionalPackages) && updatedAdditionalPackages.length > 0) {
+      const additionalPackagesData = await prisma.package.findMany({
+        where: { id: { in: updatedAdditionalPackages.map((id: any) => parseInt(id)) } }
+      });
+
+      if (additionalPackagesData.length !== updatedAdditionalPackages.length) {
+        return res.status(404).json({
+          success: false,
+          error: 'Some additional packages not found',
+          message: 'One or more additional packages could not be found'
+        });
+      }
+
+      originalPrice += additionalPackagesData.reduce((sum, pkg) => sum + pkg.price, 0);
+    }
+
+    // Handle discount code changes
+    let discountCodeData = null;
+    let discountAmount = 0;
+    let finalPrice = originalPrice;
+    let newDiscountCodeId = existingAppointment.discountCodeId;
+
+    // If removing discount
+    if (removeDiscount) {
+      newDiscountCodeId = null;
+      discountAmount = 0;
+      finalPrice = originalPrice;
+
+      // Remove existing discount usage if exists
+      if (existingAppointment.discountCodeId) {
+        await prisma.discountCodeUsage.deleteMany({
+          where: {
+            discountCodeId: existingAppointment.discountCodeId,
+            clientId: existingAppointment.clientId,
+            appointmentId: appointmentId
+          }
+        });
+      }
+    }
+    // If adding/changing discount code
+    else if (discountCode) {
+      discountCodeData = await prisma.discountCode.findUnique({
+        where: { 
+          code: discountCode,
+          isActive: true 
+        }
+      });
+
+      if (discountCodeData) {
+        const targetClientId = clientId ? parseInt(clientId) : existingAppointment.clientId;
+        
+        // Check if client has already used this discount code (excluding current appointment)
+        const existingUsage = await prisma.discountCodeUsage.findFirst({
+          where: {
+            discountCodeId: discountCodeData.id,
+            clientId: targetClientId,
+            appointmentId: { not: appointmentId }
+          }
+        });
+
+        if (existingUsage) {
+          return res.status(400).json({
+            success: false,
+            error: 'Discount code already used',
+            message: 'This client has already used this discount code'
+          });
+        }
+
+        // Calculate discount amount
+        discountAmount = Math.round((originalPrice * discountCodeData.discountPercent / 100) * 100) / 100;
+        finalPrice = originalPrice - discountAmount;
+        newDiscountCodeId = discountCodeData.id;
+
+        // Remove old discount usage if exists and different
+        if (existingAppointment.discountCodeId && existingAppointment.discountCodeId !== discountCodeData.id) {
+          await prisma.discountCodeUsage.deleteMany({
+            where: {
+              discountCodeId: existingAppointment.discountCodeId,
+              clientId: existingAppointment.clientId,
+              appointmentId: appointmentId
+            }
+          });
+        }
+
+        // Create new discount usage record if it doesn't exist
+        const currentUsage = await prisma.discountCodeUsage.findFirst({
+          where: {
+            discountCodeId: discountCodeData.id,
+            clientId: targetClientId,
+            appointmentId: appointmentId
+          }
+        });
+
+        if (!currentUsage) {
+          await prisma.discountCodeUsage.create({
+            data: {
+              discountCodeId: discountCodeData.id,
+              clientId: targetClientId,
+              appointmentId: appointmentId
+            }
+          });
+        }
+      } else {
+        return res.status(404).json({
+          success: false,
+          error: 'Invalid discount code',
+          message: 'Discount code not found or inactive'
+        });
+      }
+    }
+    // Keep existing discount if no changes
+    else if (existingAppointment.discountCodeId) {
+      newDiscountCodeId = existingAppointment.discountCodeId;
+      discountAmount = existingAppointment.discountAmount || 0;
+      finalPrice = originalPrice - discountAmount;
+    }
+
+    // Update appointment
+    const updatedAppointment = await prisma.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        ...(clientId && { clientId: parseInt(clientId) }),
+        ...(packageId && { packageId: parseInt(packageId) }),
+        ...(barberId !== undefined && { barberId: barberId ? parseInt(barberId) : null }),
+        ...(appointmentDate !== undefined && { 
+          appointmentDate: appointmentDate ? new Date(appointmentDate) : null 
+        }),
+        ...(notes !== undefined && { notes: notes || null }),
+        ...(updatedAdditionalPackages !== undefined && { additionalPackages: updatedAdditionalPackages }),
+        originalPrice: originalPrice,
+        finalPrice: finalPrice,
+        discountCodeId: newDiscountCodeId,
+        discountAmount: discountAmount || null
+      },
+      include: {
+        client: {
+          select: {
+            clientId: true,
+            fullName: true,
+            phoneNumber: true
+          }
+        },
+        package: {
+          select: {
+            name: true,
+            description: true,
+            price: true,
+            duration: true,
+            barber: true
+          }
+        },
+        barber: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true
+          }
+        }
+      }
+    });
+
+    res.json({
+      success: true,
+      data: updatedAppointment,
+      message: 'Appointment updated successfully'
+    });
+  } catch (error) {
+    console.error('Error editing appointment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to edit appointment',
       message: 'Internal server error'
     });
   }
