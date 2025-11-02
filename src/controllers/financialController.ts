@@ -201,13 +201,6 @@ async function getServiceBreakdown(dateFilter: any) {
   appointments.forEach(apt => {
     // Handle null packages gracefully
     const serviceName = apt.package?.name || 'Unknown Service';
-    console.log('🔍 Service Breakdown Debug:', {
-      appointmentId: apt.id,
-      packageExists: !!apt.package,
-      packageName: apt.package?.name,
-      serviceName: serviceName,
-      finalPrice: apt.finalPrice
-    });
     
     if (!serviceMap.has(serviceName)) {
       serviceMap.set(serviceName, {
@@ -222,9 +215,7 @@ async function getServiceBreakdown(dateFilter: any) {
     service.totalRevenue += apt.finalPrice || 0;
   });
 
-  const result = Array.from(serviceMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
-  console.log('🔍 Service Breakdown Final Result:', result);
-  return result;
+  return Array.from(serviceMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
 }
 
 // Get staff personal financial report

@@ -242,7 +242,7 @@ export const createAppointment = async (req: Request, res: Response) => {
         clientId: parseInt(clientId),
         packageId: parseInt(packageId),
         barberId: barberId ? parseInt(barberId) : null,
-        appointmentDate: appointmentDate ? new Date(appointmentDate) : null,
+        appointmentDate: appointmentDate ? new Date(appointmentDate) : new Date(),
         notes: notes || null,
         additionalPackages: additionalPackages || null,
         originalPrice: originalPrice,
