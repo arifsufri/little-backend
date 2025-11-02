@@ -201,6 +201,14 @@ async function getServiceBreakdown(dateFilter: any) {
   appointments.forEach(apt => {
     // Handle null packages gracefully
     const serviceName = apt.package?.name || 'Unknown Service';
+    console.log('🔍 Service Breakdown Debug:', {
+      appointmentId: apt.id,
+      packageExists: !!apt.package,
+      packageName: apt.package?.name,
+      serviceName: serviceName,
+      finalPrice: apt.finalPrice
+    });
+    
     if (!serviceMap.has(serviceName)) {
       serviceMap.set(serviceName, {
         name: serviceName,
