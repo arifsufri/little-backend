@@ -222,7 +222,9 @@ async function getServiceBreakdown(dateFilter: any) {
     service.totalRevenue += apt.finalPrice || 0;
   });
 
-  return Array.from(serviceMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
+  const result = Array.from(serviceMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
+  console.log('🔍 Service Breakdown Final Result:', result);
+  return result;
 }
 
 // Get staff personal financial report
