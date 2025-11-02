@@ -70,10 +70,11 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
       (sum, apt) => sum + (apt.finalPrice || 0), 0
     );
 
-    // Calculate total commission paid (based on original price, not discounted price)
+    // Calculate total commission paid (based on final price, not original price)
     const totalCommissionPaid = completedAppointments.reduce((sum, apt) => {
       if (apt.barber && apt.barber.commissionRate) {
-        const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
+        // Use finalPrice for commission calculation to match appointments page logic
+        const priceForCommission = apt.finalPrice || 0;
         return sum + (priceForCommission * (apt.barber.commissionRate / 100));
       }
       return sum;
@@ -166,9 +167,8 @@ async function getBarberPerformance(dateFilter: any) {
   return barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const totalSales = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
-    // Commission calculated on original price, not discounted price
-    const totalCommissionBase = appointments.reduce((sum, apt) => sum + (apt.originalPrice || apt.finalPrice || 0), 0);
-    const commissionPaid = totalCommissionBase * ((barber.commissionRate || 0) / 100);
+    // Commission calculated on final price to match appointments page logic
+    const commissionPaid = totalSales * ((barber.commissionRate || 0) / 100);
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
     return {
@@ -199,7 +199,8 @@ async function getServiceBreakdown(dateFilter: any) {
   const serviceMap = new Map();
 
   appointments.forEach(apt => {
-    const serviceName = apt.package.name;
+    // Handle null packages gracefully
+    const serviceName = apt.package?.name || 'Unknown Service';
     if (!serviceMap.has(serviceName)) {
       serviceMap.set(serviceName, {
         name: serviceName,
