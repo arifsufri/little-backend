@@ -70,11 +70,11 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
       (sum, apt) => sum + (apt.finalPrice || 0), 0
     );
 
-    // Calculate total commission paid (based on final price, not original price)
+    // Calculate total commission paid (based on original price for commission calculation)
     const totalCommissionPaid = completedAppointments.reduce((sum, apt) => {
       if (apt.barber && apt.barber.commissionRate) {
-        // Use finalPrice for commission calculation to match appointments page logic
-        const priceForCommission = apt.finalPrice || 0;
+        // Use originalPrice for commission calculation (base service price before discounts/additions)
+        const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
         return sum + (priceForCommission * (apt.barber.commissionRate / 100));
       }
       return sum;
@@ -167,8 +167,13 @@ async function getBarberPerformance(dateFilter: any) {
   return barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const totalSales = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
-    // Commission calculated on final price to match appointments page logic
-    const commissionPaid = totalSales * ((barber.commissionRate || 0) / 100);
+    // Commission calculated per appointment based on original price (base service)
+    const commissionPaid = appointments.reduce((sum, apt) => {
+      // Use originalPrice for commission (base service price), fallback to finalPrice if not set
+      const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
+      const appointmentCommission = priceForCommission * ((barber.commissionRate || 0) / 100);
+      return sum + appointmentCommission;
+    }, 0);
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
     return {
