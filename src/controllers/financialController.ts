@@ -201,23 +201,87 @@ async function getServiceBreakdown(dateFilter: any) {
     }
   });
 
+  // Get all packages to lookup additional package names
+  const allPackages = await prisma.package.findMany({
+    select: {
+      id: true,
+      name: true,
+      price: true
+    }
+  });
+  const packageMap = new Map(allPackages.map(pkg => [pkg.id, pkg]));
+
   const serviceMap = new Map();
 
   appointments.forEach(apt => {
-    // Handle null packages gracefully
-    const serviceName = apt.package?.name || 'Unknown Service';
+    // Process base package
+    const baseServiceName = apt.package?.name || 'Unknown Service';
     
-    if (!serviceMap.has(serviceName)) {
-      serviceMap.set(serviceName, {
-        name: serviceName,
+    if (!serviceMap.has(baseServiceName)) {
+      serviceMap.set(baseServiceName, {
+        name: baseServiceName,
         count: 0,
         totalRevenue: 0
       });
     }
     
-    const service = serviceMap.get(serviceName);
-    service.count += 1;
-    service.totalRevenue += apt.finalPrice || 0;
+    const baseService = serviceMap.get(baseServiceName);
+    baseService.count += 1;
+    
+    // Get additional package IDs
+    const additionalPackageIds = apt.additionalPackages && Array.isArray(apt.additionalPackages) 
+      ? apt.additionalPackages.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id))
+      : [];
+    
+    // Calculate total package price for proportional revenue distribution
+    let totalPackagePrice = apt.package?.price || 0;
+    additionalPackageIds.forEach(packageId => {
+      const additionalPkg = packageMap.get(packageId);
+      if (additionalPkg) {
+        totalPackagePrice += additionalPkg.price || 0;
+      }
+    });
+    
+    // Count each additional package
+    additionalPackageIds.forEach(packageId => {
+      const additionalPkg = packageMap.get(packageId);
+      if (additionalPkg) {
+        const additionalServiceName = additionalPkg.name;
+        
+        if (!serviceMap.has(additionalServiceName)) {
+          serviceMap.set(additionalServiceName, {
+            name: additionalServiceName,
+            count: 0,
+            totalRevenue: 0
+          });
+        }
+        
+        const additionalService = serviceMap.get(additionalServiceName);
+        additionalService.count += 1;
+      }
+    });
+    
+    // Calculate revenue proportionally based on package prices
+    if (totalPackagePrice > 0) {
+      const baseServiceRevenue = (apt.finalPrice || 0) * ((apt.package?.price || 0) / totalPackagePrice);
+      baseService.totalRevenue += baseServiceRevenue;
+      
+      // Add revenue for additional packages
+      additionalPackageIds.forEach(packageId => {
+        const additionalPkg = packageMap.get(packageId);
+        if (additionalPkg) {
+          const additionalServiceName = additionalPkg.name;
+          const additionalService = serviceMap.get(additionalServiceName);
+          if (additionalService) {
+            const additionalServiceRevenue = (apt.finalPrice || 0) * ((additionalPkg.price || 0) / totalPackagePrice);
+            additionalService.totalRevenue += additionalServiceRevenue;
+          }
+        }
+      });
+    } else {
+      // Fallback: if no price data, just add to base service
+      baseService.totalRevenue += apt.finalPrice || 0;
+    }
   });
 
   return Array.from(serviceMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
@@ -297,6 +361,16 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
       })))}
     `);
 
+    // Get all packages to lookup additional package names
+    const allPackages = await prisma.package.findMany({
+      select: {
+        id: true,
+        name: true,
+        price: true
+      }
+    });
+    const packageMap = new Map(allPackages.map(pkg => [pkg.id, pkg]));
+
     // Calculate earnings
     const totalCustomers = appointments.length;
     const totalRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
@@ -305,28 +379,89 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
     const commissionRate = user.commissionRate || 0;
     const totalEarnings = totalCommissionBase * (commissionRate / 100);
 
-    // Service breakdown
+    // Service breakdown - include base package and additional packages
     const serviceMap = new Map();
+    let totalServicesCount = 0;
+    
     appointments.forEach(apt => {
-      const serviceName = apt.package.name;
+      // Process base package
+      const baseServiceName = apt.package.name;
       const servicePrice = apt.finalPrice || 0;
       // Commission calculated on original price, not discounted price
       const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
-      const barberShare = priceForCommission * (commissionRate / 100);
-
-      if (!serviceMap.has(serviceName)) {
-        serviceMap.set(serviceName, {
-          name: serviceName,
+      
+      // Get additional package IDs
+      const additionalPackageIds = apt.additionalPackages && Array.isArray(apt.additionalPackages) 
+        ? apt.additionalPackages.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id))
+        : [];
+      
+      // Calculate total package price for proportional distribution
+      let totalPackagePrice = apt.package?.price || 0;
+      additionalPackageIds.forEach(packageId => {
+        const additionalPkg = packageMap.get(packageId);
+        if (additionalPkg) {
+          totalPackagePrice += additionalPkg.price || 0;
+        }
+      });
+      
+      // Process base package
+      if (!serviceMap.has(baseServiceName)) {
+        serviceMap.set(baseServiceName, {
+          name: baseServiceName,
           count: 0,
           totalRevenue: 0,
           barberShare: 0
         });
       }
       
-      const service = serviceMap.get(serviceName);
-      service.count += 1;
-      service.totalRevenue += servicePrice;
-      service.barberShare += barberShare;
+      const baseService = serviceMap.get(baseServiceName);
+      baseService.count += 1;
+      totalServicesCount += 1;
+      
+      // Calculate proportional revenue and commission for base package
+      if (totalPackagePrice > 0) {
+        const baseServicePrice = servicePrice * ((apt.package.price || 0) / totalPackagePrice);
+        const basePriceForCommission = priceForCommission * ((apt.package.price || 0) / totalPackagePrice);
+        baseService.totalRevenue += baseServicePrice;
+        baseService.barberShare += basePriceForCommission * (commissionRate / 100);
+      } else {
+        baseService.totalRevenue += servicePrice;
+        baseService.barberShare += priceForCommission * (commissionRate / 100);
+      }
+      
+      // Process each additional package
+      additionalPackageIds.forEach(packageId => {
+        const additionalPkg = packageMap.get(packageId);
+        if (additionalPkg) {
+          const additionalServiceName = additionalPkg.name;
+          
+          if (!serviceMap.has(additionalServiceName)) {
+            serviceMap.set(additionalServiceName, {
+              name: additionalServiceName,
+              count: 0,
+              totalRevenue: 0,
+              barberShare: 0
+            });
+          }
+          
+          const additionalService = serviceMap.get(additionalServiceName);
+          additionalService.count += 1;
+          totalServicesCount += 1;
+          
+          // Calculate proportional revenue and commission for additional package
+          if (totalPackagePrice > 0) {
+            const additionalServicePrice = servicePrice * ((additionalPkg.price || 0) / totalPackagePrice);
+            const additionalPriceForCommission = priceForCommission * ((additionalPkg.price || 0) / totalPackagePrice);
+            additionalService.totalRevenue += additionalServicePrice;
+            additionalService.barberShare += additionalPriceForCommission * (commissionRate / 100);
+          } else {
+            const additionalServicePrice = servicePrice / (additionalPackageIds.length + 1);
+            const additionalPriceForCommission = priceForCommission / (additionalPackageIds.length + 1);
+            additionalService.totalRevenue += additionalServicePrice;
+            additionalService.barberShare += additionalPriceForCommission * (commissionRate / 100);
+          }
+        }
+      });
     });
 
     const serviceBreakdown = Array.from(serviceMap.values());
@@ -363,7 +498,7 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
           totalCustomers,
           totalEarnings,
           commissionRate,
-          totalServices: appointments.length
+          totalServices: totalServicesCount
         },
         serviceBreakdown,
         earningsHistory,
