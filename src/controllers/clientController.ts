@@ -50,7 +50,7 @@ export const registerClient = async (req: Request, res: Response) => {
       return res.status(409).json({
         success: false,
         error: 'Client already exists',
-        message: 'A client with this phone number already exists',
+        message: 'A client with this phone number already exists. Please Login instead.',
         clientExists: true
       });
     }

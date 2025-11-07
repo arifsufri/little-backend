@@ -21,6 +21,7 @@ export const getAllStaff = async (req: Request, res: Response) => {
         role: true,
         isActive: true,
         commissionRate: true,
+        productCommissionRate: true,
         createdAt: true,
         avatar: true,
         barberAppointments: {
@@ -46,6 +47,7 @@ export const getAllStaff = async (req: Request, res: Response) => {
       status: member.isActive ? 'active' : 'inactive',
       joinDate: member.createdAt.toISOString(),
       commissionRate: member.commissionRate || 0.0,
+      productCommissionRate: (member as any).productCommissionRate ?? 5.0,
       totalAppointments: member.barberAppointments.length,
       totalRevenue: member.barberAppointments
         .filter(apt => apt.status === 'completed' && apt.finalPrice)
@@ -85,6 +87,7 @@ export const getStaffById = async (req: Request, res: Response) => {
         role: true,
         isActive: true,
         commissionRate: true,
+        productCommissionRate: true,
         createdAt: true,
         avatar: true,
         barberAppointments: {
@@ -114,6 +117,7 @@ export const getStaffById = async (req: Request, res: Response) => {
       status: staff.isActive ? 'active' : 'inactive',
       joinDate: staff.createdAt.toISOString(),
       commissionRate: staff.commissionRate || 0.0,
+      productCommissionRate: (staff as any).productCommissionRate ?? 5.0,
       totalAppointments: staff.barberAppointments.length,
       totalRevenue: staff.barberAppointments
         .filter(apt => apt.status === 'completed' && apt.finalPrice)

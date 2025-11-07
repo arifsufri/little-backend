@@ -23,12 +23,15 @@ model User {
   role      UserRole  @default(Client)
   isActive  Boolean   @default(false)
   commissionRate Float? @default(0.0)
+  productCommissionRate Float? @default(5.0)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   packages  Package[]
   barberAppointments Appointment[] @relation("AppointmentBarber")
   expenses  Expense[] @relation("ExpenseCreator")
   discountCodes DiscountCode[] @relation("DiscountCodeCreator")
+  productSales ProductSale[] @relation("ProductSalesStaff")
+  createdProducts Product[] @relation("ProductCreator")
 }
 
 model Package {
@@ -61,6 +64,7 @@ model Client {
   // Relations
   appointments Appointment[] 
   discountUsages DiscountCodeUsage[]
+  productSales ProductSale[]
 }
 
 model Appointment {
@@ -151,4 +155,49 @@ model DiscountCodeUsage {
   appointment    Appointment? @relation(fields: [appointmentId], references: [id])
   
   // Allow multiple uses of the same discount code by the same client
+}
+
+// Product model for retail items (e.g., pomade, hair products)
+model Product {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  price       Float
+  stock       Int      @default(0) 
+  imageUrl    String?
+  isActive    Boolean  @default(true)
+  createdBy   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  creator     User          @relation("ProductCreator", fields: [createdBy], references: [id])
+  sales       ProductSale[]
+  
+  @@index([isActive])
+}
+
+// ProductSale model to track product sales with staff commission
+model ProductSale {
+  id          Int      @id @default(autoincrement())
+  productId   Int
+  clientId    Int?
+  staffId     Int    
+  quantity    Int      @default(1)
+  unitPrice   Float   
+  totalPrice  Float   
+  commissionRate Float @default(5.0) 
+  commissionAmount Float 
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  product     Product  @relation(fields: [productId], references: [id])
+  client      Client?  @relation(fields: [clientId], references: [id])
+  staff       User     @relation("ProductSalesStaff", fields: [staffId], references: [id])
+  
+  @@index([staffId])
+  @@index([productId])
+  @@index([createdAt])
 }

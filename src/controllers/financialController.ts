@@ -65,13 +65,31 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // Calculate total revenue
-    const totalRevenue = completedAppointments.reduce(
+    // Build product sales date filter
+    const productSalesDateFilter: any = {};
+    if (startDate && endDate) {
+      const startOfDay = new Date(startDate as string + 'T00:00:00+08:00');
+      const endOfDay = new Date(endDate as string + 'T23:59:59.999+08:00');
+      productSalesDateFilter.createdAt = {
+        gte: startOfDay,
+        lte: endOfDay
+      };
+    }
+    
+    // Get product sales for the date range
+    const productSales = await (prisma as any).productSale.findMany({
+      where: productSalesDateFilter
+    });
+    
+    // Calculate total revenue (appointments + product sales)
+    const appointmentRevenue = completedAppointments.reduce(
       (sum, apt) => sum + (apt.finalPrice || 0), 0
     );
+    const productSalesRevenue = productSales.reduce((sum: number, sale: any) => sum + sale.totalPrice, 0);
+    const totalRevenue = appointmentRevenue + productSalesRevenue;
 
     // Calculate total commission paid (based on original price for commission calculation)
-    const totalCommissionPaid = completedAppointments.reduce((sum, apt) => {
+    let totalCommissionPaid = completedAppointments.reduce((sum, apt) => {
       if (apt.barber && apt.barber.commissionRate) {
         // Use originalPrice for commission calculation (base service price before discounts/additions)
         const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
@@ -79,6 +97,10 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
       }
       return sum;
     }, 0);
+
+    // Add product sales commission (5% of product sales)
+    const productSalesCommission = productSales.reduce((sum: number, sale: any) => sum + (sale.commissionAmount || 0), 0);
+    totalCommissionPaid += productSalesCommission;
 
     // Get total expenses
     const expenseFilter: any = {};
@@ -164,16 +186,60 @@ async function getBarberPerformance(dateFilter: any) {
     }
   });
 
+  // Build product sales date filter - match the appointment date filter
+  // Extract date range from the dateFilter OR conditions (both use same date range)
+  const productSalesDateFilter: any = {};
+  
+  if (Object.keys(dateFilter).length > 0) {
+    if (dateFilter.OR && Array.isArray(dateFilter.OR) && dateFilter.OR.length > 0) {
+      // Both OR conditions have the same date range, extract from the first one that has it
+      const appointmentDateCondition = dateFilter.OR.find((c: any) => c.appointmentDate);
+      const createdAtCondition = dateFilter.OR.find((c: any) => c.createdAt);
+      
+      // Use the date range from either condition (they're the same)
+      if (appointmentDateCondition && appointmentDateCondition.appointmentDate) {
+        productSalesDateFilter.createdAt = appointmentDateCondition.appointmentDate;
+      } else if (createdAtCondition && createdAtCondition.createdAt) {
+        productSalesDateFilter.createdAt = createdAtCondition.createdAt;
+      }
+    } else if (dateFilter.appointmentDate) {
+      productSalesDateFilter.createdAt = dateFilter.appointmentDate;
+    } else if (dateFilter.createdAt) {
+      productSalesDateFilter.createdAt = dateFilter.createdAt;
+    }
+  }
+  // If no date filter, fetch all product sales (empty filter = all records)
+
+  // Get all product sales for the date range
+  const allProductSales = await (prisma as any).productSale.findMany({
+    where: productSalesDateFilter,
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          price: true
+        }
+      }
+    }
+  });
+
   return barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const totalSales = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
     // Commission calculated per appointment based on original price (base service)
-    const commissionPaid = appointments.reduce((sum, apt) => {
+    let commissionPaid = appointments.reduce((sum, apt) => {
       // Use originalPrice for commission (base service price), fallback to finalPrice if not set
       const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
       const appointmentCommission = priceForCommission * ((barber.commissionRate || 0) / 100);
       return sum + appointmentCommission;
     }, 0);
+
+    // Add product sales commission (5% of product sales) for this barber
+    const barberProductSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
+    const productSalesCommission = barberProductSales.reduce((sum: number, sale: any) => sum + (sale.commissionAmount || 0), 0);
+    commissionPaid += productSalesCommission;
+
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
     return {
@@ -371,13 +437,54 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
     });
     const packageMap = new Map(allPackages.map(pkg => [pkg.id, pkg]));
 
-    // Calculate earnings
+    // Get product sales for this staff member
+    const productSalesWhere: any = {
+      staffId: user.id
+    };
+    if (startDate && endDate) {
+      const startOfDay = new Date(startDate as string + 'T00:00:00+08:00');
+      const endOfDay = new Date(endDate as string + 'T23:59:59.999+08:00');
+      productSalesWhere.createdAt = {
+        gte: startOfDay,
+        lte: endOfDay
+      };
+    }
+
+    // Note: After running Prisma migration, this will work
+    // For now, using type assertion to avoid TypeScript errors
+    const productSales = await (prisma as any).productSale.findMany({
+      where: productSalesWhere,
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            price: true
+          }
+        },
+        client: {
+          select: {
+            id: true,
+            fullName: true
+          }
+        }
+      }
+    });
+
+    // Calculate earnings from appointments
     const totalCustomers = appointments.length;
     const totalRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
     // Commission calculated on original price, not discounted price
     const totalCommissionBase = appointments.reduce((sum, apt) => sum + (apt.originalPrice || apt.finalPrice || 0), 0);
     const commissionRate = user.commissionRate || 0;
-    const totalEarnings = totalCommissionBase * (commissionRate / 100);
+    const appointmentEarnings = totalCommissionBase * (commissionRate / 100);
+
+    // Calculate earnings from product sales (5% commission)
+    const productSalesRevenue = productSales.reduce((sum: number, sale: any) => sum + sale.totalPrice, 0);
+    const productSalesEarnings = productSales.reduce((sum: number, sale: any) => sum + sale.commissionAmount, 0);
+
+    // Total earnings (appointments + product sales)
+    const totalEarnings = appointmentEarnings + productSalesEarnings;
 
     // Service breakdown - include base package and additional packages
     const serviceMap = new Map();
@@ -497,8 +604,12 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
         summary: {
           totalCustomers,
           totalEarnings,
+          appointmentEarnings,
+          productSalesEarnings,
+          productSalesRevenue,
           commissionRate,
-          totalServices: totalServicesCount
+          totalServices: totalServicesCount,
+          totalProductSales: productSales.length
         },
         serviceBreakdown,
         earningsHistory,
@@ -510,6 +621,15 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
           totalPrice: apt.finalPrice,
           // Commission calculated on original price, not discounted price
           earnings: (apt.originalPrice || apt.finalPrice || 0) * (commissionRate / 100)
+        })),
+        recentProductSales: productSales.slice(0, 10).map((sale: any) => ({
+          id: sale.id,
+          date: sale.createdAt,
+          client: sale.client?.fullName || 'Walk-in',
+          product: sale.product.name,
+          quantity: sale.quantity,
+          totalPrice: sale.totalPrice,
+          earnings: sale.commissionAmount
         }))
       }
     });
@@ -539,31 +659,46 @@ export const updateCommissionRate = async (req: AuthRequest, res: Response) => {
     }
 
     const { staffId } = req.params;
-    const { commissionRate } = req.body;
+    const { commissionRate, productCommissionRate } = req.body;
 
-    // Validate commission rate
-    if (typeof commissionRate !== 'number' || commissionRate < 0 || commissionRate > 100) {
+    // Validate commission rates
+    if (commissionRate !== undefined && (typeof commissionRate !== 'number' || commissionRate < 0 || commissionRate > 100)) {
       return res.status(400).json({
         success: false,
         message: 'Commission rate must be a number between 0 and 100'
       });
     }
 
-    // Update staff commission rate
+    if (productCommissionRate !== undefined && (typeof productCommissionRate !== 'number' || productCommissionRate < 0 || productCommissionRate > 100)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product commission rate must be a number between 0 and 100'
+      });
+    }
+
+    // Build update data
+    const updateData: any = {};
+    if (commissionRate !== undefined) {
+      updateData.commissionRate = commissionRate;
+    }
+    if (productCommissionRate !== undefined) {
+      updateData.productCommissionRate = productCommissionRate;
+    }
+
+    // Update staff commission rate(s)
     const updatedStaff = await prisma.user.update({
       where: {
         id: parseInt(staffId),
         role: { in: ['Boss', 'Staff'] }
       },
-      data: {
-        commissionRate
-      },
+      data: updateData,
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
-        commissionRate: true
+        commissionRate: true,
+        productCommissionRate: true
       }
     });
 

@@ -349,9 +349,44 @@ export const getAllAppointments = async (req: Request, res: Response) => {
       }
     });
 
+    // Add product sales for each appointment
+    const appointmentsWithProducts = await Promise.all(
+      appointments.map(async (appointment) => {
+        const appointmentDate = appointment.appointmentDate || appointment.createdAt;
+        const startOfDay = new Date(appointmentDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(appointmentDate);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const productSales = await (prisma as any).productSale.findMany({
+          where: {
+            clientId: appointment.clientId,
+            createdAt: {
+              gte: startOfDay,
+              lte: endOfDay
+            }
+          },
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                price: true
+              }
+            }
+          }
+        });
+
+        return {
+          ...appointment,
+          productSales: productSales || []
+        };
+      })
+    );
+
     res.json({
       success: true,
-      data: appointments,
+      data: appointmentsWithProducts,
       message: 'Appointments retrieved successfully'
     });
   } catch (error) {
@@ -458,21 +493,40 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       });
     }
 
-    // If completing appointment, validate additional packages exist
-    if (status === 'completed' && additionalPackages && additionalPackages.length > 0) {
-      const packageIds = additionalPackages.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id));
-      if (packageIds.length > 0) {
-        const packages = await prisma.package.findMany({
-          where: { id: { in: packageIds } }
-        });
-        if (packages.length !== packageIds.length) {
-          return res.status(400).json({
-            success: false,
-            error: 'Invalid additional packages',
-            message: 'One or more additional packages do not exist'
+    // If completing appointment, validate additional packages exist and recalculate originalPrice
+    let recalculatedOriginalPrice = existingAppointment.originalPrice;
+    if (status === 'completed' && additionalPackages !== undefined) {
+      // Get base package price
+      const basePackage = await prisma.package.findUnique({
+        where: { id: existingAppointment.packageId },
+        select: { price: true }
+      });
+      
+      let newOriginalPrice = basePackage?.price || 0;
+      
+      // Add additional packages if provided
+      if (additionalPackages && Array.isArray(additionalPackages) && additionalPackages.length > 0) {
+        const packageIds = additionalPackages.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id));
+        if (packageIds.length > 0) {
+          const packages = await prisma.package.findMany({
+            where: { id: { in: packageIds } },
+            select: { price: true }
           });
+          
+          if (packages.length !== packageIds.length) {
+            return res.status(400).json({
+              success: false,
+              error: 'Invalid additional packages',
+              message: 'One or more additional packages do not exist'
+            });
+          }
+          
+          // Add prices of additional packages
+          newOriginalPrice += packages.reduce((sum, pkg) => sum + pkg.price, 0);
         }
       }
+      
+      recalculatedOriginalPrice = newOriginalPrice;
     }
 
     // If marking as completed, assign current user as barber (if not already assigned)
@@ -486,6 +540,11 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       ...(discountCodeId !== undefined && { discountCodeId: discountCodeId ? parseInt(discountCodeId) : null }),
       ...(discountAmount !== undefined && { discountAmount: discountAmount ? parseFloat(discountAmount) : null })
     };
+    
+    // Update originalPrice when completing with additional packages
+    if (status === 'completed' && additionalPackages !== undefined) {
+      updateData.originalPrice = recalculatedOriginalPrice;
+    }
 
     // Handle barber assignment (Boss only, unless auto-assigning on completion)
     if (barberId !== undefined) {
@@ -578,7 +637,8 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
               id: true,
               name: true,
               role: true,
-              commissionRate: true
+              commissionRate: true,
+              productCommissionRate: true
             }
           }
         }
@@ -644,9 +704,15 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       return appointment;
     });
 
+    // Ensure barberId is included in response (in case barber object is null)
+    const responseData = {
+      ...updatedAppointment,
+      barberId: updatedAppointment.barberId || updatedAppointment.barber?.id || null
+    };
+
     res.json({
       success: true,
-      data: updatedAppointment,
+      data: responseData,
       message: 'Appointment updated successfully'
     });
   } catch (error) {
@@ -664,7 +730,8 @@ export const editAppointment = async (req: Request, res: Response) => {
     const appointmentId = parseInt(req.params.id);
     const { 
       clientId, 
-      packageId, 
+      packageId,
+      finalPrice: providedFinalPrice, // Accept finalPrice from request (may include products) 
       barberId, 
       additionalPackages, 
       appointmentDate, 
@@ -985,6 +1052,9 @@ export const editAppointment = async (req: Request, res: Response) => {
       finalPrice = originalPrice - discountAmount;
     }
 
+    // Use provided finalPrice if available (may include products), otherwise use calculated finalPrice
+    const finalPriceToUse = providedFinalPrice !== undefined ? parseFloat(providedFinalPrice) : finalPrice;
+
     // Update appointment
     const updatedAppointment = await prisma.appointment.update({
       where: { id: appointmentId },
@@ -997,8 +1067,8 @@ export const editAppointment = async (req: Request, res: Response) => {
         }),
         ...(notes !== undefined && { notes: notes || null }),
         ...(updatedAdditionalPackages !== undefined && { additionalPackages: updatedAdditionalPackages }),
-        originalPrice: originalPrice,
-        finalPrice: finalPrice,
+        originalPrice: originalPrice, // Keep originalPrice for commission (services only)
+        finalPrice: finalPriceToUse, // Use provided finalPrice (may include products) or calculated
         discountCodeId: newDiscountCodeId,
         discountAmount: discountAmount || null
       },
@@ -1092,6 +1162,51 @@ export const deleteAppointment = async (req: Request, res: Response) => {
       });
     }
 
+    // Find product sales related to this appointment
+    // Match by clientId and date (created within same day as appointment)
+    const appointmentDate = existingAppointment.appointmentDate || existingAppointment.createdAt;
+    const startOfDay = new Date(appointmentDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(appointmentDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const relatedProductSales = await (prisma as any).productSale.findMany({
+      where: {
+        clientId: existingAppointment.clientId,
+        createdAt: {
+          gte: startOfDay,
+          lte: endOfDay
+        }
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            stock: true
+          }
+        }
+      }
+    });
+
+    // Restore product stock for each sale
+    for (const sale of relatedProductSales) {
+      if (sale.product && sale.product.stock !== null) {
+        await (prisma as any).product.update({
+          where: { id: sale.productId },
+          data: {
+            stock: {
+              increment: sale.quantity
+            }
+          }
+        });
+      }
+      
+      // Delete the product sale record
+      await (prisma as any).productSale.delete({
+        where: { id: sale.id }
+      });
+    }
+
     // Delete appointment
     await prisma.appointment.delete({
       where: { id: appointmentId }
@@ -1099,7 +1214,8 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      message: 'Appointment deleted successfully'
+      message: 'Appointment deleted successfully',
+      restoredProducts: relatedProductSales.length
     });
   } catch (error) {
     console.error('Error deleting appointment:', error);
