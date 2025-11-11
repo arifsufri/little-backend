@@ -81,17 +81,23 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
       where: productSalesDateFilter
     });
     
-    // Calculate total revenue (appointments + product sales)
     const appointmentRevenue = completedAppointments.reduce(
       (sum, apt) => sum + (apt.finalPrice || 0), 0
     );
-    const productSalesRevenue = productSales.reduce((sum: number, sale: any) => sum + sale.totalPrice, 0);
-    const totalRevenue = appointmentRevenue + productSalesRevenue;
-
-    // Calculate total commission paid (based on original price for commission calculation)
+    const appointmentClientDayKeys = new Set<string>();
+    for (const apt of completedAppointments) {
+      const clientId = apt.clientId;
+      if (!clientId) continue;
+      const date = (apt.appointmentDate ?? apt.createdAt).toISOString().split('T')[0];
+      appointmentClientDayKeys.add(`${clientId}-${date}`);
+    }
+    
+    const filteredProductSalesRevenue = 0;
+    
+    const totalRevenue = appointmentRevenue + filteredProductSalesRevenue;
+    
     let totalCommissionPaid = completedAppointments.reduce((sum, apt) => {
       if (apt.barber && apt.barber.commissionRate) {
-        // Use originalPrice for commission calculation (base service price before discounts/additions)
         const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
         return sum + (priceForCommission * (apt.barber.commissionRate / 100));
       }
