@@ -286,9 +286,9 @@ async function getServiceBreakdown(dateFilter: any) {
   const serviceMap = new Map();
 
   appointments.forEach(apt => {
-    // Process base package
+    // 1) 基础服务：计数 + 按标价累加总额（避免比例分配导致的小数）
     const baseServiceName = apt.package?.name || 'Unknown Service';
-    
+    const baseServicePrice = apt.package?.price || 0;
     if (!serviceMap.has(baseServiceName)) {
       serviceMap.set(baseServiceName, {
         name: baseServiceName,
@@ -296,30 +296,18 @@ async function getServiceBreakdown(dateFilter: any) {
         totalRevenue: 0
       });
     }
-    
     const baseService = serviceMap.get(baseServiceName);
     baseService.count += 1;
-    
-    // Get additional package IDs
+    baseService.totalRevenue += baseServicePrice;
+
+    // 2) 附加服务：逐个计数 + 按各自标价累加
     const additionalPackageIds = apt.additionalPackages && Array.isArray(apt.additionalPackages) 
       ? apt.additionalPackages.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id))
       : [];
-    
-    // Calculate total package price for proportional revenue distribution
-    let totalPackagePrice = apt.package?.price || 0;
-    additionalPackageIds.forEach(packageId => {
-      const additionalPkg = packageMap.get(packageId);
-      if (additionalPkg) {
-        totalPackagePrice += additionalPkg.price || 0;
-      }
-    });
-    
-    // Count each additional package
     additionalPackageIds.forEach(packageId => {
       const additionalPkg = packageMap.get(packageId);
       if (additionalPkg) {
         const additionalServiceName = additionalPkg.name;
-        
         if (!serviceMap.has(additionalServiceName)) {
           serviceMap.set(additionalServiceName, {
             name: additionalServiceName,
@@ -327,33 +315,11 @@ async function getServiceBreakdown(dateFilter: any) {
             totalRevenue: 0
           });
         }
-        
         const additionalService = serviceMap.get(additionalServiceName);
         additionalService.count += 1;
+        additionalService.totalRevenue += (additionalPkg.price || 0);
       }
     });
-    
-    // Calculate revenue proportionally based on package prices
-    if (totalPackagePrice > 0) {
-      const baseServiceRevenue = (apt.finalPrice || 0) * ((apt.package?.price || 0) / totalPackagePrice);
-      baseService.totalRevenue += baseServiceRevenue;
-      
-      // Add revenue for additional packages
-      additionalPackageIds.forEach(packageId => {
-        const additionalPkg = packageMap.get(packageId);
-        if (additionalPkg) {
-          const additionalServiceName = additionalPkg.name;
-          const additionalService = serviceMap.get(additionalServiceName);
-          if (additionalService) {
-            const additionalServiceRevenue = (apt.finalPrice || 0) * ((additionalPkg.price || 0) / totalPackagePrice);
-            additionalService.totalRevenue += additionalServiceRevenue;
-          }
-        }
-      });
-    } else {
-      // Fallback: if no price data, just add to base service
-      baseService.totalRevenue += apt.finalPrice || 0;
-    }
   });
 
   return Array.from(serviceMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
