@@ -230,24 +230,39 @@ async function getBarberPerformance(dateFilter: any) {
     }
   });
 
+  // Build a map to quickly find product totals by (staffId, clientId, date)
+  // key format: `${staffId}-${clientId || 'walkin'}-${YYYY-MM-DD}`
+  const productTotalsByStaffClientDate = new Map<string, number>();
+  const productCommissionByStaff = new Map<number, number>();
+  for (const sale of allProductSales) {
+    const date = new Date(sale.createdAt).toISOString().split('T')[0];
+    const key = `${sale.staffId}-${sale.clientId ?? 'walkin'}-${date}`;
+    productTotalsByStaffClientDate.set(key, (productTotalsByStaffClientDate.get(key) || 0) + (sale.totalPrice || 0));
+    productCommissionByStaff.set(sale.staffId, (productCommissionByStaff.get(sale.staffId) || 0) + (sale.commissionAmount || 0));
+  }
+
   const performance = barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const appointmentSalesRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
-    // Commission calculated per appointment based on original price (base service)
-    let commissionPaid = appointments.reduce((sum, apt) => {
-      // Use originalPrice for commission (base service price), fallback to finalPrice if not set
-      const priceForCommission = apt.originalPrice || apt.finalPrice || 0;
-      const appointmentCommission = priceForCommission * ((barber.commissionRate || 0) / 100);
-      return sum + appointmentCommission;
-    }, 0);
+    // Commission base should be services-only revenue (exclude products sold the same day to the same client by this barber)
+    let serviceCommission = 0;
+    for (const apt of appointments) {
+      const date = (apt.appointmentDate ?? apt.createdAt).toISOString().split('T')[0];
+      const key = `${barber.id}-${apt.clientId}-${date}`;
+      const productsSameDay = productTotalsByStaffClientDate.get(key) || 0;
+      const serviceOnlyRevenue = Math.max(0, (apt.finalPrice || 0) - productsSameDay);
+      serviceCommission += serviceOnlyRevenue * ((barber.commissionRate || 0) / 100);
+    }
 
     // Add product sales commission (5% of product sales) for this barber
     const barberProductSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
-    const productSalesCommission = barberProductSales.reduce((sum: number, sale: any) => sum + (sale.commissionAmount || 0), 0);
-    commissionPaid += productSalesCommission;
+    const productSalesCommission = productCommissionByStaff.get(barber.id) || 0;
+    const commissionPaid = serviceCommission + productSalesCommission;
 
     // Total sales should align with appointments only to avoid double counting
     const totalSales = appointmentSalesRevenue;
+    const totalSalesRounded = Math.round(totalSales * 100) / 100;
+    const commissionPaidRounded = Math.round(commissionPaid * 100) / 100;
 
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
@@ -255,8 +270,8 @@ async function getBarberPerformance(dateFilter: any) {
       id: barber.id,
       name: barber.name,
       customerCount,
-      totalSales,
-      commissionPaid,
+      totalSales: totalSalesRounded,
+      commissionPaid: commissionPaidRounded,
       commissionRate: barber.commissionRate || 0,
       appointmentCount: appointments.length
     };
@@ -266,9 +281,10 @@ async function getBarberPerformance(dateFilter: any) {
       appointmentCount: appointments.length,
       appointmentSalesRevenue: appointmentSalesRevenue.toFixed(2),
       productSalesCount: barberProductSales.length,
+      serviceCommission: serviceCommission.toFixed(2),
       productSalesCommission: productSalesCommission.toFixed(2),
-      finalTotalSales: totalSales.toFixed(2),
-      finalCommissionPaid: commissionPaid.toFixed(2),
+      finalTotalSales: totalSalesRounded.toFixed(2),
+      finalCommissionPaid: commissionPaidRounded.toFixed(2),
       commissionRate: barber.commissionRate || 0
     });
 
@@ -278,8 +294,8 @@ async function getBarberPerformance(dateFilter: any) {
   console.log('[Financial] Barber Performance Summary', performance.map(b => ({
     id: b.id,
     name: b.name,
-    totalSales: b.totalSales,
-    commissionPaid: b.commissionPaid
+    totalSales: Number(b.totalSales.toFixed(2)),
+    commissionPaid: Number(b.commissionPaid.toFixed(2))
   })));
 
   return performance;
