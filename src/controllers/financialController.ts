@@ -230,7 +230,7 @@ async function getBarberPerformance(dateFilter: any) {
     }
   });
 
-  return barbers.map(barber => {
+  const performance = barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const appointmentSalesRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
     // Commission calculated per appointment based on original price (base service)
@@ -251,7 +251,7 @@ async function getBarberPerformance(dateFilter: any) {
 
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
-    return {
+    const result = {
       id: barber.id,
       name: barber.name,
       customerCount,
@@ -260,7 +260,29 @@ async function getBarberPerformance(dateFilter: any) {
       commissionRate: barber.commissionRate || 0,
       appointmentCount: appointments.length
     };
+
+    console.log(`[Financial] Barber Performance Debug → ${barber.name}`, {
+      barberId: barber.id,
+      appointmentCount: appointments.length,
+      appointmentSalesRevenue: appointmentSalesRevenue.toFixed(2),
+      productSalesCount: barberProductSales.length,
+      productSalesCommission: productSalesCommission.toFixed(2),
+      finalTotalSales: totalSales.toFixed(2),
+      finalCommissionPaid: commissionPaid.toFixed(2),
+      commissionRate: barber.commissionRate || 0
+    });
+
+    return result;
   });
+
+  console.log('[Financial] Barber Performance Summary', performance.map(b => ({
+    id: b.id,
+    name: b.name,
+    totalSales: b.totalSales,
+    commissionPaid: b.commissionPaid
+  })));
+
+  return performance;
 }
 
 // Get service breakdown data
