@@ -232,7 +232,7 @@ async function getBarberPerformance(dateFilter: any) {
 
   return barbers.map(barber => {
     const appointments = barber.barberAppointments;
-    const totalSales = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
+    const appointmentSalesRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
     // Commission calculated per appointment based on original price (base service)
     let commissionPaid = appointments.reduce((sum, apt) => {
       // Use originalPrice for commission (base service price), fallback to finalPrice if not set
@@ -245,6 +245,9 @@ async function getBarberPerformance(dateFilter: any) {
     const barberProductSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
     const productSalesCommission = barberProductSales.reduce((sum: number, sale: any) => sum + (sale.commissionAmount || 0), 0);
     commissionPaid += productSalesCommission;
+
+    // Total sales should align with appointments only to avoid double counting
+    const totalSales = appointmentSalesRevenue;
 
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
