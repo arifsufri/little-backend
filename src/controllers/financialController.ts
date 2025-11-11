@@ -244,15 +244,26 @@ async function getBarberPerformance(dateFilter: any) {
   const performance = barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const appointmentSalesRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
-    // Commission base should be services-only revenue (exclude products sold the same day to the same client by this barber)
-    let serviceCommission = 0;
+    // Commission base should be services-only revenue.
+    // To robustly exclude products (even when sale.clientId is null), compute per-day aggregates:
+    // serviceOnlyRevenuePerDay = max(0, sum(appointments.finalPrice by day) - sum(productSales.totalPrice by day for this staff))
+    const appointmentRevenueByDay = new Map<string, number>();
     for (const apt of appointments) {
       const date = (apt.appointmentDate ?? apt.createdAt).toISOString().split('T')[0];
-      const key = `${barber.id}-${apt.clientId}-${date}`;
-      const productsSameDay = productTotalsByStaffClientDate.get(key) || 0;
-      const serviceOnlyRevenue = Math.max(0, (apt.finalPrice || 0) - productsSameDay);
-      serviceCommission += serviceOnlyRevenue * ((barber.commissionRate || 0) / 100);
+      appointmentRevenueByDay.set(date, (appointmentRevenueByDay.get(date) || 0) + (apt.finalPrice || 0));
     }
+    const staffSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
+    const productRevenueByDay = new Map<string, number>();
+    for (const sale of staffSales) {
+      const date = new Date(sale.createdAt).toISOString().split('T')[0];
+      productRevenueByDay.set(date, (productRevenueByDay.get(date) || 0) + (sale.totalPrice || 0));
+    }
+    let serviceOnlyRevenueTotal = 0;
+    for (const [date, dayAptRevenue] of appointmentRevenueByDay.entries()) {
+      const dayProductRevenue = productRevenueByDay.get(date) || 0;
+      serviceOnlyRevenueTotal += Math.max(0, dayAptRevenue - dayProductRevenue);
+    }
+    const serviceCommission = serviceOnlyRevenueTotal * ((barber.commissionRate || 0) / 100);
 
     // Add product sales commission (5% of product sales) for this barber
     const barberProductSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
