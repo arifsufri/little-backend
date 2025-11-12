@@ -139,6 +139,9 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
     // Get service breakdown
     const serviceBreakdown = await getServiceBreakdown(dateFilter);
 
+    // Get product sales breakdown
+    const productSalesBreakdown = await getProductSalesBreakdown(productSalesDateFilter);
+
     res.json({
       success: true,
       data: {
@@ -151,6 +154,7 @@ export const getFinancialOverview = async (req: AuthRequest, res: Response) => {
         },
         barberPerformance,
         serviceBreakdown,
+        productSalesBreakdown,
         expenses: expenses.map(exp => ({
           id: exp.id,
           category: exp.category,
@@ -310,6 +314,43 @@ async function getBarberPerformance(dateFilter: any) {
   })));
 
   return performance;
+}
+
+// Get product sales breakdown data
+async function getProductSalesBreakdown(dateFilter: any) {
+  const productSales = await (prisma as any).productSale.findMany({
+    where: Object.keys(dateFilter).length > 0 ? dateFilter : {},
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          price: true
+        }
+      }
+    }
+  });
+
+  const productMap = new Map();
+
+  productSales.forEach((sale: any) => {
+    const productName = sale.product?.name || 'Unknown Product';
+    const productPrice = sale.product?.price || 0;
+    
+    if (!productMap.has(productName)) {
+      productMap.set(productName, {
+        name: productName,
+        quantity: 0,
+        totalRevenue: 0
+      });
+    }
+    
+    const product = productMap.get(productName);
+    product.quantity += sale.quantity || 1;
+    product.totalRevenue += sale.totalPrice || 0;
+  });
+
+  return Array.from(productMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
 }
 
 // Get service breakdown data
