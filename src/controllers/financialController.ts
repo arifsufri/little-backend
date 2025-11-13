@@ -234,8 +234,6 @@ async function getBarberPerformance(dateFilter: any) {
     }
   });
 
-  // Build a map to quickly find product totals by (staffId, clientId, date)
-  // key format: `${staffId}-${clientId || 'walkin'}-${YYYY-MM-DD}`
   const productTotalsByStaffClientDate = new Map<string, number>();
   const productCommissionByStaff = new Map<number, number>();
   for (const sale of allProductSales) {
@@ -268,17 +266,33 @@ async function getBarberPerformance(dateFilter: any) {
     }
     const serviceCommission = serviceOnlyRevenueTotal * ((barber.commissionRate || 0) / 100);
 
-    // Add product sales commission (5% of product sales) for this barber
     const barberProductSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
     const productSalesCommission = productCommissionByStaff.get(barber.id) || 0;
     const commissionPaid = serviceCommission + productSalesCommission;
 
-    // Total sales should align with appointments only to avoid double counting
     const totalSales = appointmentSalesRevenue;
     const totalSalesRounded = Math.round(totalSales * 100) / 100;
     const commissionPaidRounded = Math.round(commissionPaid * 100) / 100;
 
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
+
+    // Count appointments by package type
+    const packageCounts = new Map<string, number>();
+    appointments.forEach(apt => {
+      if (apt.package && apt.package.name) {
+        const count = packageCounts.get(apt.package.name) || 0;
+        packageCounts.set(apt.package.name, count + 1);
+      }
+    });
+
+    // Count products sold by product type
+    const productCounts = new Map<string, number>();
+    barberProductSales.forEach((sale: any) => {
+      if (sale.product && sale.product.name) {
+        const count = productCounts.get(sale.product.name) || 0;
+        productCounts.set(sale.product.name, count + 1);
+      }
+    });
 
     const result = {
       id: barber.id,
@@ -287,14 +301,19 @@ async function getBarberPerformance(dateFilter: any) {
       totalSales: totalSalesRounded,
       commissionPaid: commissionPaidRounded,
       commissionRate: barber.commissionRate || 0,
-      appointmentCount: appointments.length
+      appointmentCount: appointments.length,
+      packageBreakdown: Array.from(packageCounts.entries()).map(([name, count]) => ({ name, count })),
+      productBreakdown: Array.from(productCounts.entries()).map(([name, count]) => ({ name, count })),
+      totalProductsSold: barberProductSales.length
     };
 
     console.log(`[Financial] Barber Performance Debug → ${barber.name}`, {
       barberId: barber.id,
       appointmentCount: appointments.length,
+      packageBreakdown: Array.from(packageCounts.entries()),
+      productBreakdown: Array.from(productCounts.entries()),
+      totalProductsSold: barberProductSales.length,
       appointmentSalesRevenue: appointmentSalesRevenue.toFixed(2),
-      productSalesCount: barberProductSales.length,
       serviceCommission: serviceCommission.toFixed(2),
       productSalesCommission: productSalesCommission.toFixed(2),
       finalTotalSales: totalSalesRounded.toFixed(2),
@@ -378,7 +397,6 @@ async function getServiceBreakdown(dateFilter: any) {
   const serviceMap = new Map();
 
   appointments.forEach(apt => {
-    // 1) 基础服务：计数 + 按标价累加总额（避免比例分配导致的小数）
     const baseServiceName = apt.package?.name || 'Unknown Service';
     const baseServicePrice = apt.package?.price || 0;
     if (!serviceMap.has(baseServiceName)) {
@@ -392,7 +410,6 @@ async function getServiceBreakdown(dateFilter: any) {
     baseService.count += 1;
     baseService.totalRevenue += baseServicePrice;
 
-    // 2) 附加服务：逐个计数 + 按各自标价累加
     const additionalPackageIds = apt.additionalPackages && Array.isArray(apt.additionalPackages) 
       ? apt.additionalPackages.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id))
       : [];
@@ -514,8 +531,6 @@ export const getStaffFinancialReport = async (req: AuthRequest, res: Response) =
       };
     }
 
-    // Note: After running Prisma migration, this will work
-    // For now, using type assertion to avoid TypeScript errors
     const productSales = await (prisma as any).productSale.findMany({
       where: productSalesWhere,
       include: {

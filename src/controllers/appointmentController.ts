@@ -308,7 +308,6 @@ export const createAppointment = async (req: Request, res: Response) => {
 export const getAllAppointments = async (req: Request, res: Response) => {
   try {
     const appointments = await prisma.appointment.findMany({
-      orderBy: { createdAt: 'desc' },
       include: {
         client: {
           select: {
@@ -384,9 +383,16 @@ export const getAllAppointments = async (req: Request, res: Response) => {
       })
     );
 
+    // Sort appointments by appointmentDate (if exists) or createdAt, descending (newest first)
+    const sortedAppointments = appointmentsWithProducts.sort((a, b) => {
+      const dateA = a.appointmentDate ? new Date(a.appointmentDate) : new Date(a.createdAt);
+      const dateB = b.appointmentDate ? new Date(b.appointmentDate) : new Date(b.createdAt);
+      return dateB.getTime() - dateA.getTime(); // Descending order
+    });
+
     res.json({
       success: true,
-      data: appointmentsWithProducts,
+      data: sortedAppointments,
       message: 'Appointments retrieved successfully'
     });
   } catch (error) {
@@ -1059,8 +1065,8 @@ export const editAppointment = async (req: Request, res: Response) => {
     const updatedAppointment = await prisma.appointment.update({
       where: { id: appointmentId },
       data: {
-        ...(clientId && { clientId: parseInt(clientId) }),
-        ...(packageId && { packageId: parseInt(packageId) }),
+        ...(clientId ? { clientId: parseInt(clientId) } : {}),
+        ...(packageId ? { packageId: parseInt(packageId) } : {}),
         ...(barberId !== undefined && { barberId: barberId ? parseInt(barberId) : null }),
         ...(appointmentDate !== undefined && { 
           appointmentDate: appointmentDate ? new Date(appointmentDate) : null 
