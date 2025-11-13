@@ -304,7 +304,7 @@ export const deleteProduct = async (req: AuthRequest, res: Response) => {
 // Sell product (Staff can sell, Boss can also sell)
 export const sellProduct = async (req: AuthRequest, res: Response) => {
   try {
-    const { productId, clientId, quantity, notes, commissionRate, staffId } = req.body;
+    const { productId, clientId, quantity, notes, commissionRate, staffId, saleDate } = req.body;
 
     // Check if user is Boss or Staff
     const user = await prisma.user.findUnique({
@@ -410,19 +410,28 @@ export const sellProduct = async (req: AuthRequest, res: Response) => {
     
     const commissionAmount = (totalPrice * commission) / 100;
 
-    // Create sale record
+    // Create sale record with custom date if provided
+    const saleData: any = {
+      productId: product.id,
+      clientId: clientId ? parseInt(clientId) : null,
+      staffId: targetStaffId, // Use the determined staff ID (appointment barber or logged-in user)
+      quantity: qty,
+      unitPrice: unitPrice,
+      totalPrice: totalPrice,
+      commissionRate: commission,
+      commissionAmount: commissionAmount,
+      notes: notes || null
+    };
+
+    // If saleDate is provided, use it for both createdAt and updatedAt
+    if (saleDate) {
+      const customDate = new Date(saleDate);
+      saleData.createdAt = customDate;
+      saleData.updatedAt = customDate;
+    }
+
     const sale = await (prisma as any).productSale.create({
-      data: {
-        productId: product.id,
-        clientId: clientId ? parseInt(clientId) : null,
-        staffId: targetStaffId, // Use the determined staff ID (appointment barber or logged-in user)
-        quantity: qty,
-        unitPrice: unitPrice,
-        totalPrice: totalPrice,
-        commissionRate: commission,
-        commissionAmount: commissionAmount,
-        notes: notes || null
-      },
+      data: saleData,
       include: {
         product: {
           select: {
