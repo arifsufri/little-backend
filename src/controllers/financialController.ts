@@ -259,11 +259,10 @@ async function getBarberPerformance(dateFilter: any) {
       const date = new Date(sale.createdAt).toISOString().split('T')[0];
       productRevenueByDay.set(date, (productRevenueByDay.get(date) || 0) + (sale.totalPrice || 0));
     }
-    let serviceOnlyRevenueTotal = 0;
-    for (const [date, dayAptRevenue] of appointmentRevenueByDay.entries()) {
-      const dayProductRevenue = productRevenueByDay.get(date) || 0;
-      serviceOnlyRevenueTotal += Math.max(0, dayAptRevenue - dayProductRevenue);
-    }
+    // Calculate service commission based on originalPrice (before discount, services only)
+    const serviceOnlyRevenueTotal = appointments.reduce((sum, apt) => {
+      return sum + (apt.originalPrice || apt.finalPrice || 0);
+    }, 0);
     const serviceCommission = serviceOnlyRevenueTotal * ((barber.commissionRate || 0) / 100);
 
     const barberProductSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
@@ -313,11 +312,10 @@ async function getBarberPerformance(dateFilter: any) {
       packageBreakdown: Array.from(packageCounts.entries()),
       productBreakdown: Array.from(productCounts.entries()),
       totalProductsSold: barberProductSales.length,
-      appointmentSalesRevenue: appointmentSalesRevenue.toFixed(2),
+      serviceOnlyRevenueTotal: serviceOnlyRevenueTotal.toFixed(2),
       serviceCommission: serviceCommission.toFixed(2),
       productSalesCommission: productSalesCommission.toFixed(2),
-      finalTotalSales: totalSalesRounded.toFixed(2),
-      finalCommissionPaid: commissionPaidRounded.toFixed(2),
+      totalCommissionPaid: commissionPaidRounded.toFixed(2),
       commissionRate: barber.commissionRate || 0
     });
 
