@@ -248,13 +248,12 @@ async function getBarberPerformance(dateFilter: any) {
   const performance = barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const appointmentSalesRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
-    // Commission base should be services-only revenue.
-    // To robustly exclude products (even when sale.clientId is null), compute per-day aggregates:
-    // serviceOnlyRevenuePerDay = max(0, sum(appointments.finalPrice by day) - sum(productSales.totalPrice by day for this staff))
+
     const appointmentRevenueByDay = new Map<string, number>();
     for (const apt of appointments) {
       const date = (apt.appointmentDate ?? apt.createdAt).toISOString().split('T')[0];
-      appointmentRevenueByDay.set(date, (appointmentRevenueByDay.get(date) || 0) + (apt.finalPrice || 0));
+
+      appointmentRevenueByDay.set(date, (appointmentRevenueByDay.get(date) || 0) + (apt.originalPrice || apt.finalPrice || 0));
     }
     const staffSales = allProductSales.filter((sale: any) => sale.staffId === barber.id);
     const productRevenueByDay = new Map<string, number>();
