@@ -243,6 +243,16 @@ async function getBarberPerformance(dateFilter: any) {
     productCommissionByStaff.set(sale.staffId, (productCommissionByStaff.get(sale.staffId) || 0) + (sale.commissionAmount || 0));
   }
 
+  // Get all packages to lookup additional package names
+  const allPackages = await prisma.package.findMany({
+    select: {
+      id: true,
+      name: true,
+      price: true
+    }
+  });
+  const packageMap = new Map(allPackages.map(pkg => [pkg.id, pkg]));
+
   const performance = barbers.map(barber => {
     const appointments = barber.barberAppointments;
     const appointmentSalesRevenue = appointments.reduce((sum, apt) => sum + (apt.finalPrice || 0), 0);
@@ -275,13 +285,27 @@ async function getBarberPerformance(dateFilter: any) {
 
     const customerCount = new Set(appointments.map(apt => apt.clientId)).size;
 
-    // Count appointments by package type
+    // Count appointments by package type (including additional packages)
     const packageCounts = new Map<string, number>();
     appointments.forEach(apt => {
+      // Count base package
       if (apt.package && apt.package.name) {
         const count = packageCounts.get(apt.package.name) || 0;
         packageCounts.set(apt.package.name, count + 1);
       }
+      
+      // Count additional packages
+      const additionalPackageIds = apt.additionalPackages && Array.isArray(apt.additionalPackages) 
+        ? apt.additionalPackages.map((id: any) => parseInt(id)).filter((id: number) => !isNaN(id))
+        : [];
+      
+      additionalPackageIds.forEach(packageId => {
+        const additionalPkg = packageMap.get(packageId);
+        if (additionalPkg) {
+          const count = packageCounts.get(additionalPkg.name) || 0;
+          packageCounts.set(additionalPkg.name, count + 1);
+        }
+      });
     });
 
     // Count products sold by product type
